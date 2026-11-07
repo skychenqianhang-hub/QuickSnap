@@ -43,6 +43,7 @@ class Controller(QObject):
         self.hotkeys = HotkeyManager(app)
         self.hotkeys.triggered.connect(self._on_hotkey)
         self.hotkeys.show_requested.connect(self.open_settings)  # QuickSnap.exe started again
+        self.hotkeys.quit_requested.connect(self.quit)           # installer / uninstaller is running
 
         self.tray = QSystemTrayIcon(app_icon(), self)
         self.tray.activated.connect(self._on_tray_activated)

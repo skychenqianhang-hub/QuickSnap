@@ -112,11 +112,12 @@ class _Filter(QAbstractNativeEventFilter):
     Keeps only plain values (the window handle) plus the two signals, so it can
     never fail on a half-deleted owner; any unexpected error just lets the message pass."""
 
-    def __init__(self, hwnd: int, on_hotkey, on_show):
+    def __init__(self, hwnd: int, on_hotkey, on_show, on_quit):
         super().__init__()
         self.hwnd = hwnd
         self.on_hotkey = on_hotkey
         self.on_show = on_show
+        self.on_quit = on_quit
         self.active = True
 
     def nativeEventFilter(self, event_type, message):
@@ -131,6 +132,9 @@ class _Filter(QAbstractNativeEventFilter):
                 if msg.message == WM_SHOW_SETTINGS:
                     self.on_show()
                     return True, 0
+                if msg.message == WM_QUIT_REQUEST:
+                    self.on_quit()
+                    return True, 0
         except Exception:  # noqa: BLE001 - never break the program's message handling
             pass
         return False, 0
@@ -138,6 +142,7 @@ class _Filter(QAbstractNativeEventFilter):
 
 SINK_TITLE = "QuickSnap hotkey sink"   # a second QuickSnap.exe finds the running one by this title
 WM_SHOW_SETTINGS = 0x8000 + 1          # WM_APP + 1: "please open your settings window"
+WM_QUIT_REQUEST = 0x8000 + 2           # WM_APP + 2: "please quit" (sent by the installer / uninstaller)
 
 
 class HotkeyManager(QObject):
@@ -146,6 +151,7 @@ class HotkeyManager(QObject):
 
     triggered = Signal(int)
     show_requested = Signal()
+    quit_requested = Signal()
 
     def __init__(self, app):
         super().__init__()
@@ -153,7 +159,8 @@ class HotkeyManager(QObject):
         self._window.setWindowTitle(SINK_TITLE)
         self.hwnd = int(self._window.winId())
         self._app = app
-        self._filter = _Filter(self.hwnd, self.triggered.emit, self.show_requested.emit)
+        self._filter = _Filter(self.hwnd, self.triggered.emit, self.show_requested.emit,
+                               self.quit_requested.emit)
         app.installNativeEventFilter(self._filter)
         self._registered: set[int] = set()
 

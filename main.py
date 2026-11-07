@@ -44,6 +44,14 @@ def main(argv: list[str]) -> int:
     app.setQuitOnLastWindowClosed(False)  # closing a window never quits; only the tray menu does
     app.setWindowIcon(app_icon())
     config = Config()
+    from app.config import take_installer_choices
+    choices = take_installer_choices(config)   # first run after a fresh install
+    if isinstance(choices.get("autostart"), bool):
+        from app import autostart
+        try:
+            autostart.enable() if choices["autostart"] else autostart.disable()
+        except OSError:
+            pass
     i18n.set_language(config["language"])
     controller = Controller(app, config, quiet_start="--autostart" in argv)  # noqa: F841 (kept alive)
     return app.exec()

@@ -326,5 +326,23 @@ sw.autostart_box.setChecked(True)
 check("auto-start checkbox calls through", fc.auto is True and sw.autostart_status.isVisibleTo(sw))
 sw.close()
 
+# --- stage 4: choices left by the installer (UTF-8 with BOM, Chinese folder name)
+from app.config import installer_choices_path, take_installer_choices  # noqa: E402
+
+cfg4 = Config(Path(tempfile.mkdtemp()) / "config.json")
+ip = installer_choices_path()
+ip.parent.mkdir(parents=True, exist_ok=True)
+ip.write_bytes(b"\xef\xbb\xbf" + '{"save_dir": "E:\\\\截图\\\\QuickSnap", "language": "zh", "autostart": true}'
+               .encode("utf-8"))
+got = take_installer_choices(cfg4)
+check("installer choices read", got.get("autostart") is True)
+check("installer folder applied", cfg4["save_dir"] == "E:\\截图\\QuickSnap")
+check("installer language applied", cfg4["language"] == "zh")
+check("installer file removed", not ip.exists())
+check("no installer file -> nothing", take_installer_choices(cfg4) == {})
+ip.write_text("{broken", encoding="utf-8")
+check("broken installer file ignored and removed",
+      take_installer_choices(cfg4) == {} and cfg4["language"] == "zh" and not ip.exists())
+
 print("\nALL PASSED" if not failures else f"\n{failures} FAILED")
 sys.exit(1 if failures else 0)

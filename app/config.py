@@ -38,6 +38,37 @@ def default_save_dir(drives: list[str] | None = None, system_drive: str | None =
     return Path.home() / "Pictures" / APP_NAME
 
 
+def installer_choices_path() -> Path:
+    return config_dir() / "installer.json"
+
+
+def take_installer_choices(cfg: "Config") -> dict:
+    """The installer (first install only) leaves %APPDATA%\\QuickSnap\\installer.json with
+    what the user picked: {"save_dir": ..., "language": ..., "autostart": true/false}.
+    Apply folder + language to the settings, delete the file, return what was in it
+    (the caller switches auto-start on or off)."""
+    path = installer_choices_path()
+    try:
+        raw = path.read_text(encoding="utf-8-sig")  # Inno Setup writes a UTF-8 BOM
+    except OSError:
+        return {}
+    try:
+        path.unlink()  # used once, even if broken
+    except OSError:
+        pass
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    if isinstance(data.get("save_dir"), str) and data["save_dir"].strip():
+        cfg["save_dir"] = data["save_dir"].strip()
+    if data.get("language") in ("en", "zh", "ja"):
+        cfg["language"] = data["language"]
+    return data
+
+
 class Config:
     def __init__(self, path: Path | None = None):
         self.path = path or config_path()
