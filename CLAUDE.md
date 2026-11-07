@@ -11,3 +11,11 @@
 - 界面文字一律 `tr("English")`，改完补 `app/locales/zh.json`、`ja.json`，跑 `python tools_dev/i18n_check.py`。
 - 只用公开的 Windows 接口（RegisterHotKey、BitBlt 等），不装全局键盘 / 鼠标钩子。
 - .bat 含中文要存 GBK + CRLF；目前 run.bat 只用英文。
+- 交流一律中文（用户两次提醒过，长报告最容易滑回英文）。
+
+## 远端仓库与发布
+
+- GitHub：`https://github.com/skychenqianhang-hub/QuickSnap`（2026-11-07 起**公开**，MIT）。本地 `main` 跟踪 `origin/main`。gh 在 `C:\Program Files\GitHub CLI\gh.exe`（不在 PATH 里）。用户验收后提交，顺手 `git push`；推送前确认没有密钥、没有拍到用户真实屏幕的图片。
+- README.md（英文，GitHub 首页）/ README_cn.md（中文）面向外部用户，改了功能要同步。截图只用 `python tools_dev/make_screenshots.py` 在假桌面上生成，**绝不用用户的真实屏幕**。
+- 发布新版本：改 `app/version.py` → 补 CHANGELOG.md（英文）→ `python installer/build_installer.py` → 提交并 push → `git tag -a vX.Y.Z` + push tag → `gh release create vX.Y.Z installer/output/QuickSnap-Setup-X.Y.Z.exe --title "QuickSnap X.Y.Z" --notes-file <说明>`（发布说明上英文下中文）。
+
