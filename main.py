@@ -1,0 +1,49 @@
+"""QuickSnap entry point.
+
+    QuickSnap.exe                 start in the tray
+    QuickSnap.exe --autostart     same, without the "running" bubble (used at Windows sign-in)
+    QuickSnap.exe --check FILE    self-check, write results to FILE, exit
+"""
+from __future__ import annotations
+
+import sys
+
+
+def main(argv: list[str]) -> int:
+    if "--check" in argv:
+        i = argv.index("--check")
+        out = argv[i + 1] if i + 1 < len(argv) else "quicksnap_check.txt"
+        from app import selfcheck
+        return selfcheck.run(out)
+
+    from app import win32
+    if not win32.claim_single_instance("Local\\QuickSnap-single-instance"):
+        # Already running: just say so (the tray icon is the way in).
+        from PySide6.QtWidgets import QApplication, QMessageBox
+        from app import i18n
+        from app.config import Config
+        app = QApplication(argv)
+        i18n.set_language(Config()["language"])
+        QMessageBox.information(None, "QuickSnap",
+                                i18n.tr("QuickSnap is already running — look for its icon in the tray "
+                                        "(bottom-right of the screen)."))
+        return 0
+
+    from PySide6.QtWidgets import QApplication
+    from app import i18n
+    from app.config import Config
+    from app.controller import Controller
+    from app.icon import app_icon
+
+    app = QApplication(argv)
+    app.setApplicationName("QuickSnap")
+    app.setQuitOnLastWindowClosed(False)  # closing a window never quits; only the tray menu does
+    app.setWindowIcon(app_icon())
+    config = Config()
+    i18n.set_language(config["language"])
+    controller = Controller(app, config, quiet_start="--autostart" in argv)  # noqa: F841 (kept alive)
+    return app.exec()
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

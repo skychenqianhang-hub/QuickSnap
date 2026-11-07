@@ -1,0 +1,46 @@
+# QuickSnap（快截）项目说明书
+
+Windows 截图小工具：常驻托盘，按全局快捷键截图，结果自动进剪贴板，可选保存。
+
+## 用户确认过的需求（2026-11-07）
+
+- **一个快捷键**（默认 `Ctrl+Alt+A`，设置里可改）。按下后所有屏幕变暗：
+  - 拖动 = 自选区域；
+  - 单击 = 截鼠标下的那个窗口；点在空桌面上 = 截这块屏幕（阶段 2；阶段 1 先做「单击 = 整块屏幕」）。
+  - 选好后有即时预览，可以拖边角调大小、整体移动（阶段 2）。
+  - 工具条：复制（✓）/ 保存（默认文件夹）/ 另存为（自己选）/ 取消。任何一种完成方式都会复制到剪贴板。
+- 多显示器：每块屏各自变暗，单击截的是点到的那块屏。
+- 默认保存位置：优先用非系统盘（如 `D:\QuickSnap Screenshots`），没有才用 `图片\QuickSnap`。设置里可改；安装程序里让用户确认。
+- 界面默认英文，可选简体中文、日语。
+- 画图标注（框、箭头、画笔、文字、马赛克）放到以后。
+- 命名：程序叫 QuickSnap（中文称呼「快截」），由 Claude 取名，用户未反对。
+
+## 阶段
+
+1. ✅（2026-11-07 验收）托盘常驻 + 全局快捷键 + 拖框截图 + 工具条 + 多屏 / 高分屏 + 打包 exe。
+2. 单击选窗口或整屏；选框可调整（拖边角、拖动整体、方向键微调）。
+3. 设置窗口：快捷键（含冲突提示）、保存位置、开机自启（当前用户的 Run 注册表项）、语言。
+4. 安装程序（Inno Setup，安装时选截图保存位置）+ 发布。
+5. 画图标注（以后再说）。
+
+## 技术要点
+
+- Python 3.11 + PySide6 6.11.2，conda 环境 `quicksnap`（`C:\Users\Sky Chen\anaconda3\envs\quicksnap`）。
+- 截屏：GDI BitBlt 一次抓整个虚拟桌面（物理像素），再按 EnumDisplayMonitors 的物理矩形切成每屏一张（`app/capture.py`）。
+- 每块屏一个无边框置顶窗口（`app/overlay.py`），用 MonitorFromWindow 找到自己对应哪块屏；选框按物理像素存，画的时候才换算成 Qt 逻辑坐标，所以 125% / 150% 缩放下也准。
+- 全局快捷键：RegisterHotKey + 一个不显示的窗口接收 WM_HOTKEY（`app/hotkey.py`）。不装键盘钩子。
+- 设置：`%APPDATA%\QuickSnap\config.json`（测试时可用环境变量 `QUICKSNAP_CONFIG_DIR` 换位置）。
+- 界面文字：英文写在 `tr("...")` 里，`app/locales/zh.json`、`ja.json` 是译文；`python tools_dev/i18n_check.py` 查漏。
+
+## 测试
+
+- 自动测试：`python -m tests.test_core`
+- 打包：`python -m PyInstaller --noconfirm --clean QuickSnap.spec` → `dist\QuickSnap\QuickSnap.exe`
+- 打包后自检：`QuickSnap.exe --check 结果.txt`，末行 `ALL PASSED`。
+- 真实快捷键测试：`python tools_dev/live_hotkey_test.py 输出目录`（会真的按 Ctrl+Alt+A 和 Esc）。
+- 外观预览：`python tools_dev/preview_overlay.py 输出目录 [zh|ja|en]`。
+- 这台电脑只有一块 1920×1080、100% 缩放的屏，多屏 / 混合缩放靠代码设计保证，尚未实机验证。
+
+## 进度记录
+
+- 2026-11-07 阶段 1 完成并验收。
