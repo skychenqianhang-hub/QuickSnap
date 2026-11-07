@@ -100,7 +100,7 @@ def run(result_path: str) -> int:
         assert normalize("alt+ctrl+a") == "Ctrl+Alt+A"
         hk = HotkeyManager(app)
         ok = hk.register(99, "Ctrl+Alt+Shift+F11")
-        hk.unregister_all()
+        hk.close()
         return "register/unregister ok" if ok else "parse ok (test combo taken by another program)"
 
     def t_config():
@@ -128,9 +128,44 @@ def run(result_path: str) -> int:
     def t_icon():
         assert not app_icon().isNull()
 
+    def t_autostart():
+        import sys as _sys
+        from app import autostart
+        cmd = autostart.command()
+        if getattr(_sys, "frozen", False):
+            assert _sys.executable in cmd and cmd.endswith("--autostart"), cmd
+        name = "QuickSnap-selfcheck"            # throw-away entry, removed right away
+        autostart.enable(name, cmd)
+        try:
+            assert autostart.is_enabled(name) and autostart.registered_command(name) == cmd
+        finally:
+            autostart.disable(name)
+        assert autostart.registered_command(name) is None
+        state = "on" if autostart.is_enabled() else "off"
+        return f"write/read/remove ok; QuickSnap's own auto-start is {state}"
+
+    def t_settings():
+        from app.settings_window import SettingsWindow
+
+        class _C:  # minimal stand-in so nothing real is changed
+            hotkey_ok = True
+            def hotkey_text(self): return "Ctrl+Alt+A"
+            def default_hotkey(self): return "Ctrl+Alt+A"
+            def save_dir(self): return Path(tmp)
+            def autostart_enabled(self): return False
+            def __getattr__(self, _): return lambda *a, **k: None
+
+        for lang in ("en", "zh", "ja"):
+            i18n.set_language(lang)
+            w = SettingsWindow(_C())
+            w.close()
+        i18n.set_language("en")
+        return "builds in en / zh / ja"
+
     for name, fn in [("monitors", t_monitors), ("windows", t_windows),("screen copy", t_grab), ("capture windows", t_overlay),
                      ("clipboard", t_clipboard), ("hotkey", t_hotkey), ("settings", t_config),
-                     ("save png", t_save), ("languages", t_i18n), ("icon", t_icon)]:
+                     ("save png", t_save), ("languages", t_i18n), ("icon", t_icon),
+                     ("start with Windows", t_autostart), ("settings window", t_settings)]:
         if name in ("capture windows", "clipboard", "save png") and "shots" not in shots_box:
             lines.append(f"SKIP {name} (no screen picture)")
             failed = True

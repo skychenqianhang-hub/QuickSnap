@@ -229,5 +229,102 @@ check("no magnifier while moving the box", not ov.magnifier_visible())
 QTest.mouseRelease(ov, Qt.MouseButton.LeftButton, pos=QPoint(360, 350))
 s2.close()
 
+# --- stage 3: shortcut checks
+M = win32
+check("text_from", hotkey.text_from(M.MOD_CONTROL | M.MOD_SHIFT, 0x58) == "Ctrl+Shift+X")
+check("text_from unknown key", hotkey.text_from(M.MOD_CONTROL, 0xFF) is None)
+check("bare letter rejected", hotkey.problem_with(0, 0x41) is not None)
+check("Shift+letter rejected", hotkey.problem_with(M.MOD_SHIFT, 0x41) is not None)
+check("Ctrl+Alt+A accepted", hotkey.problem_with(M.MOD_CONTROL | M.MOD_ALT, 0x41) is None)
+check("Win+letter accepted", hotkey.problem_with(M.MOD_WIN | M.MOD_SHIFT, 0x41) is None)
+check("F1 alone accepted", hotkey.problem_with(0, 0x70) is None)
+check("PrintScreen alone accepted", hotkey.problem_with(0, 0x2C) is None)
+check("Qt key -> VK letter", hotkey.vk_from_qt(int(Qt.Key.Key_X.value)) == 0x58)
+check("Qt key -> VK F5", hotkey.vk_from_qt(int(Qt.Key.Key_F5.value)) == 0x74)
+check("Qt key -> VK print", hotkey.vk_from_qt(int(Qt.Key.Key_Print.value)) == 0x2C)
+
+# --- stage 3: start with Windows (uses a throw-away entry name, removed again)
+from app import autostart  # noqa: E402
+
+T = "QuickSnap-autotest"
+autostart.disable(T)
+check("autostart off at first", not autostart.is_enabled(T))
+autostart.enable(T, r'"C:\Fake\QuickSnap.exe" --autostart')
+check("autostart on", autostart.is_enabled(T))
+check("autostart command stored", autostart.registered_command(T) == r'"C:\Fake\QuickSnap.exe" --autostart')
+autostart.disable(T)
+check("autostart off again", not autostart.is_enabled(T) and autostart.registered_command(T) is None)
+check("autostart command (source run) uses pythonw + main.py",
+      "pythonw.exe" in autostart.command() and "main.py" in autostart.command())
+
+# --- stage 3: settings window with a stand-in controller
+from PySide6.QtGui import QFocusEvent  # noqa: E402
+
+from app.settings_window import SettingsWindow  # noqa: E402
+
+
+class FakeController:
+    def __init__(self):
+        self.hotkey = "Ctrl+Alt+A"
+        self.hotkey_ok = True
+        self.paused = 0
+        self.resumed = 0
+        self.taken = {"Ctrl+Shift+Q"}  # pretend another program owns this one
+        self.folder = Path(tempfile.mkdtemp())
+        self.auto = False
+
+    def hotkey_text(self): return self.hotkey
+    def default_hotkey(self): return "Ctrl+Alt+A"
+    def pause_hotkey(self): self.paused += 1
+    def resume_hotkey(self): self.resumed += 1
+
+    def set_hotkey(self, text):
+        if text in self.taken:
+            return "taken"
+        self.hotkey = text
+        return None
+
+    def save_dir(self): return self.folder
+    def set_save_dir(self, p): self.folder = Path(p)
+    def open_folder(self): pass
+    def autostart_enabled(self): return self.auto
+
+    def set_autostart(self, on):
+        self.auto = on
+
+    def set_language(self, code): self.lang = code
+
+
+def focus_in(w):
+    QApplication.sendEvent(w, QFocusEvent(QEvent.Type.FocusIn, Qt.FocusReason.MouseFocusReason))
+
+
+fc = FakeController()
+for lang in ("en", "zh", "ja"):
+    i18n.set_language(lang)
+    sw = SettingsWindow(fc)
+    check(f"settings window builds ({lang})", sw.hotkey_edit.text() == "Ctrl+Alt+A")
+    sw.close()
+i18n.set_language("en")
+sw = SettingsWindow(fc)
+ed = sw.hotkey_edit
+focus_in(ed)
+check("clicking the box pauses the old shortcut and asks for keys",
+      fc.paused == 1 and ed.text() == "Press the new shortcut…")
+QTest.keyClick(ed, Qt.Key.Key_A)
+check("bare letter -> red message, nothing changed", fc.hotkey == "Ctrl+Alt+A" and "Ctrl" in sw.hotkey_status.text())
+QTest.keyClick(ed, Qt.Key.Key_X, Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier)
+check("Ctrl+Shift+X chosen", fc.hotkey == "Ctrl+Shift+X" and ed.text() == "Ctrl+Shift+X")
+focus_in(ed)
+QTest.keyClick(ed, Qt.Key.Key_Q, Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier)
+check("taken combo -> message, old one kept", fc.hotkey == "Ctrl+Shift+X" and sw.hotkey_status.text() == "taken")
+focus_in(ed)
+QTest.keyClick(ed, Qt.Key.Key_Escape)
+QApplication.sendEvent(ed, QFocusEvent(QEvent.Type.FocusOut, Qt.FocusReason.OtherFocusReason))
+check("Esc keeps the current one", ed.text() == "Ctrl+Shift+X" and fc.resumed >= 1)
+sw.autostart_box.setChecked(True)
+check("auto-start checkbox calls through", fc.auto is True and sw.autostart_status.isVisibleTo(sw))
+sw.close()
+
 print("\nALL PASSED" if not failures else f"\n{failures} FAILED")
 sys.exit(1 if failures else 0)

@@ -51,3 +51,8 @@ def current_language() -> str:
 def tr(text: str, *args) -> str:
     out = _table.get(text, text)
     return out.format(*args) if args else out
+
+
+def tr_noop(text: str) -> str:
+    """Marks text that is translated later with tr(variable); tools_dev/i18n_check.py finds it."""
+    return text

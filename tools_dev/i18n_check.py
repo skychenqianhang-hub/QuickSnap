@@ -20,7 +20,7 @@ def collect() -> list[str]:
         tree = ast.parse(f.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if (isinstance(node, ast.Call) and node.args
-                    and ((isinstance(node.func, ast.Name) and node.func.id == "tr")
+                    and ((isinstance(node.func, ast.Name) and node.func.id in ("tr", "tr_noop"))
                          or (isinstance(node.func, ast.Attribute) and node.func.attr == "tr"))
                     and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str)):
                 if node.args[0].value not in keys:

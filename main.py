@@ -18,7 +18,11 @@ def main(argv: list[str]) -> int:
 
     from app import win32
     if not win32.claim_single_instance("Local\\QuickSnap-single-instance"):
-        # Already running: just say so (the tray icon is the way in).
+        # Already running: ask that copy to open its settings window (that's what a
+        # double-click on the program usually means). Fall back to a message.
+        from app.hotkey import SINK_TITLE, WM_SHOW_SETTINGS
+        if "--autostart" in argv or win32.ask_running_copy(SINK_TITLE, WM_SHOW_SETTINGS):
+            return 0
         from PySide6.QtWidgets import QApplication, QMessageBox
         from app import i18n
         from app.config import Config

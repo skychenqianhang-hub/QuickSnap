@@ -90,8 +90,31 @@ try:
     n2 = overlay_count()
     print("after Esc, capture windows:", n2)
     ok = ok and n2 == 0
-    # second copy must refuse politely (shows a message box; close it)
-    print("still running:", proc.poll() is None)
+    # starting the exe a second time must open the running copy's settings window
+    second = subprocess.run([str(exe)], timeout=20)
+    time.sleep(1.0)
+    titles = []
+    buf = ctypes.create_unicode_buffer(256)
+    EnumProc2 = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+    def cb2(hwnd, _):
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if pid.value == proc.pid and user32.IsWindowVisible(hwnd):
+            user32.GetWindowTextW(hwnd, buf, 256)
+            if buf.value.startswith("QuickSnap"):
+                titles.append((hwnd, buf.value))
+        return True
+
+    user32.EnumWindows(EnumProc2(cb2), 0)
+    print("second launch exit code:", second.returncode, "settings window:", [t for _, t in titles])
+    ok = ok and second.returncode == 0 and len(titles) == 1
+    snap("live_settings.png")
+    for hwnd, _ in titles:
+        user32.PostMessageW(hwnd, 0x0010, 0, 0)  # WM_CLOSE
+    time.sleep(0.5)
+    print("still running after closing settings:", proc.poll() is None)
+    ok = ok and proc.poll() is None
 finally:
     proc.terminate()
 print("LIVE TEST", "PASSED" if ok else "FAILED")

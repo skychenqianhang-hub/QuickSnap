@@ -9,8 +9,8 @@ from PySide6.QtCore import QObject, QTimer, QUrl
 from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import QFileDialog, QMenu, QSystemTrayIcon
 
-from . import capture, i18n, win32
-from .config import APP_NAME, Config
+from . import autostart, capture, i18n, win32
+from .config import APP_NAME, DEFAULTS, Config
 from .hotkey import HotkeyManager, normalize
 from .i18n import tr
 from .icon import app_icon
@@ -36,10 +36,13 @@ class Controller(QObject):
         self.app = app
         self.config = config
         self.session: CaptureSession | None = None
+        self.settings = None  # the settings window while it is open
         self._last_saved: Path | None = None
+        self._hotkey_paused = False
 
         self.hotkeys = HotkeyManager(app)
         self.hotkeys.triggered.connect(self._on_hotkey)
+        self.hotkeys.show_requested.connect(self.open_settings)  # QuickSnap.exe started again
 
         self.tray = QSystemTrayIcon(app_icon(), self)
         self.tray.activated.connect(self._on_tray_activated)
@@ -47,11 +50,17 @@ class Controller(QObject):
         self._build_menu()
         self.tray.show()
 
-        ok = self._register_hotkey()
-        if not ok:
+        try:
+            autostart.refresh_path()  # the program was moved: keep auto-start pointing at this copy
+        except OSError:
+            pass
+
+        self.hotkey_ok = self._register_hotkey()
+        if not self.hotkey_ok:
             self.notify(tr("Shortcut unavailable"),
-                        tr("{0} is already used by another program. Click the tray icon to take a "
-                           "screenshot for now.", self.hotkey_text()))
+                        tr("{0} is already used by another program. Choose another one in Settings "
+                           "(right-click the tray icon), or click the tray icon to take a screenshot.",
+                           self.hotkey_text()))
         elif not quiet_start:
             self.notify(tr("QuickSnap is running"),
                         tr("Press {0} to take a screenshot. QuickSnap stays in the tray "
@@ -65,6 +74,10 @@ class Controller(QObject):
         except ValueError:
             return self.config["hotkey"]
 
+    @staticmethod
+    def default_hotkey() -> str:
+        return DEFAULTS["hotkey"]
+
     def _register_hotkey(self) -> bool:
         return self.hotkeys.register(HOTKEY_CAPTURE, self.config["hotkey"])
 
@@ -72,12 +85,81 @@ class Controller(QObject):
         if hotkey_id == HOTKEY_CAPTURE:
             self.start_capture()
 
+    def pause_hotkey(self) -> None:
+        """While the settings window listens for a new combination, the old one must not fire."""
+        self.hotkeys.unregister(HOTKEY_CAPTURE)
+        self._hotkey_paused = True
+
+    def resume_hotkey(self) -> None:
+        if self._hotkey_paused:
+            self._hotkey_paused = False
+            self.hotkey_ok = self._register_hotkey()
+
+    def set_hotkey(self, text: str) -> str | None:
+        """Switch to a new shortcut. Returns an error message, or None when it worked.
+        On failure the previous shortcut stays in use."""
+        try:
+            new = normalize(text)
+        except ValueError:
+            self.resume_hotkey()
+            return tr("This key can't be used. Try a letter, a number or F1–F12.")
+        self.hotkeys.unregister(HOTKEY_CAPTURE)
+        self._hotkey_paused = False
+        if self.hotkeys.register(HOTKEY_CAPTURE, new):
+            self.config["hotkey"] = new
+            self.hotkey_ok = True
+            self._build_menu()
+            return None
+        self.hotkey_ok = self._register_hotkey()  # put the old one back
+        return tr("{0} is already used by another program or by Windows. Choose another one.", new)
+
+    # ---- other settings
+
+    def set_save_dir(self, path: str) -> str | None:
+        folder = Path(path)
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            probe = folder / ".quicksnap_write_test"
+            probe.write_bytes(b"")
+            probe.unlink()
+        except OSError:
+            return tr("Can't save files in this folder. Choose another one.")
+        self.config["save_dir"] = str(folder)
+        return None
+
+    @staticmethod
+    def autostart_enabled() -> bool:
+        try:
+            return autostart.is_enabled()
+        except OSError:
+            return False
+
+    def set_autostart(self, on: bool) -> str | None:
+        try:
+            autostart.enable() if on else autostart.disable()
+        except OSError as exc:
+            return tr("Windows did not allow the change: {0}", exc.strerror or str(exc))
+        return None
+
+    def open_settings(self) -> None:
+        from .settings_window import SettingsWindow
+        if self.settings is None:
+            self.settings = SettingsWindow(self)
+            self.settings.closed.connect(self._settings_closed)
+        self.settings.show()
+        self.settings.raise_()
+        self.settings.activateWindow()
+
+    def _settings_closed(self) -> None:
+        self.settings = None
+
     # ---- tray
 
     def _build_menu(self) -> None:
         menu = QMenu()
         act = menu.addAction(tr("Take screenshot") + f"\t{self.hotkey_text()}")
         act.triggered.connect(lambda: QTimer.singleShot(150, self.start_capture))  # let the menu close
+        menu.addAction(tr("Settings…")).triggered.connect(self.open_settings)
         menu.addAction(tr("Open screenshot folder")).triggered.connect(self.open_folder)
         menu.addSeparator()
         lang_menu = menu.addMenu(tr("Language"))
@@ -111,6 +193,14 @@ class Controller(QObject):
     def set_language(self, code: str) -> None:
         self.config["language"] = i18n.set_language(code)
         self._build_menu()
+        if self.settings is not None:  # rebuild the open settings window in the new language
+            pos = self.settings.pos()
+            old = self.settings
+            self.settings = None
+            old.closed.disconnect(self._settings_closed)
+            old.close()
+            self.open_settings()
+            self.settings.move(pos)
 
     # ---- capture
 
@@ -185,7 +275,9 @@ class Controller(QObject):
         subprocess.Popen(["explorer", "/select,", os.path.normpath(str(path))])
 
     def quit(self) -> None:
+        if self.settings is not None:
+            self.settings.close()
         self._end_session()
-        self.hotkeys.unregister_all()
+        self.hotkeys.close()
         self.tray.hide()
         self.app.quit()

@@ -293,6 +293,24 @@ def fixed_drives() -> list[str]:
     return out
 
 
+user32.FindWindowW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
+user32.FindWindowW.restype = wintypes.HWND
+user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+user32.AllowSetForegroundWindow.argtypes = [wintypes.DWORD]
+
+
+def ask_running_copy(title: str, message: int) -> bool:
+    """Send a message to the already-running QuickSnap (found by its hidden window's title).
+    Lets that copy bring its window to the front. False if it wasn't found."""
+    hwnd = user32.FindWindowW(None, title)
+    if not hwnd:
+        return False
+    pid = wintypes.DWORD()
+    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    user32.AllowSetForegroundWindow(pid.value)
+    return bool(user32.PostMessageW(hwnd, message, 0, 0))
+
+
 kernel32.CreateMutexW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR]
 kernel32.CreateMutexW.restype = wintypes.HANDLE
 ERROR_ALREADY_EXISTS = 183
