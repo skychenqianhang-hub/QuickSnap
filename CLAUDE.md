@@ -16,6 +16,7 @@
 ## 远端仓库与发布
 
 - GitHub：`https://github.com/skychenqianhang-hub/QuickSnap`（2026-11-07 起**公开**，MIT）。本地 `main` 跟踪 `origin/main`。gh 在 `C:\Program Files\GitHub CLI\gh.exe`（不在 PATH 里）。用户验收后提交，顺手 `git push`；推送前确认没有密钥、没有拍到用户真实屏幕的图片。
-- README.md（英文，GitHub 首页）/ README_cn.md（中文）面向外部用户，改了功能要同步。截图只用 `python tools_dev/make_screenshots.py` 在假桌面上生成，**绝不用用户的真实屏幕**。
+- README.md（英文，GitHub 首页）/ README_cn.md（中文）面向外部用户，改了功能要同步。
+- 提交说明的例外：**README_cn.md 要单独提交，提交说明用中文**（2026-11-07 用户要求：GitHub 文件列表里 README_cn.md 右边显示的是它最近一次提交的说明，用户要那里是中文）。其他提交照旧用英文；同一次改动要先提交别的文件，最后单独提交 README_cn.md。截图只用 `python tools_dev/make_screenshots.py` 在假桌面上生成，**绝不用用户的真实屏幕**。
 - 发布新版本：改 `app/version.py` → 补 CHANGELOG.md（英文）→ `python installer/build_installer.py` → 提交并 push → `git tag -a vX.Y.Z` + push tag → `gh release create vX.Y.Z installer/output/QuickSnap-Setup-X.Y.Z.exe --title "QuickSnap X.Y.Z" --notes-file <说明>`（发布说明上英文下中文）。
 

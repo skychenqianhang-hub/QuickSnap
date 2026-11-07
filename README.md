@@ -29,7 +29,7 @@ Windows tray app · window / full-screen / area capture · pixel magnifier · mu
 
 ## Install
 
-1. Download `QuickSnap-Setup-x.y.z.exe` from [Releases](https://github.com/skychenqianhang-hub/QuickSnap/releases/latest) and run it. Windows may warn about an unknown publisher (the installer is not code-signed): choose "More info → Run anyway".
+1. Download `QuickSnap-Setup-x.y.z.exe` (about 20 MB) from [Releases](https://github.com/skychenqianhang-hub/QuickSnap/releases/latest) and run it. Windows may warn about an unknown publisher (the installer is not code-signed): choose "More info → Run anyway".
 2. The installer asks where screenshots should be saved (a drive other than the system drive is suggested when you have one) and whether QuickSnap should start when you sign in.
 3. QuickSnap appears in the tray (bottom-right of the screen). Press `Ctrl+Alt+A`.
 
