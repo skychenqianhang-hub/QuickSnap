@@ -1,3 +1,5 @@
+<!-- Internal project plan and progress log, kept in Chinese on purpose (the maintainer works in Chinese). User-facing docs: README.md / README_cn.md. -->
+
 # QuickSnap（快截）项目说明书
 
 Windows 截图小工具：常驻托盘，按全局快捷键截图，结果自动进剪贴板，可选保存。

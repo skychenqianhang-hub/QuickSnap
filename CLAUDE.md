@@ -1,3 +1,5 @@
+<!-- Working notes for Claude Code (the AI assistant that builds this project), in Chinese on purpose. User-facing docs: README.md / README_cn.md. -->
+
 # QuickSnap：给 Claude Code 的开工须知
 
 每次开工先读这份，再读 `PLAN.md`（需求、阶段、进度）。
