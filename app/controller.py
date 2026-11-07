@@ -9,7 +9,7 @@ from PySide6.QtCore import QObject, QTimer, QUrl
 from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import QFileDialog, QMenu, QSystemTrayIcon
 
-from . import capture, i18n
+from . import capture, i18n, win32
 from .config import APP_NAME, Config
 from .hotkey import HotkeyManager, normalize
 from .i18n import tr
@@ -118,11 +118,12 @@ class Controller(QObject):
         if self.session is not None:
             return
         try:
+            windows = win32.list_windows(exclude_pid=os.getpid())  # before our own overlays exist
             shots = capture.grab_all()
         except OSError as exc:
             self.notify(tr("Screenshot failed"), str(exc))
             return
-        self.session = CaptureSession(shots)
+        self.session = CaptureSession(shots, windows)
         self.session.finished.connect(self._on_finished)
         self.session.start()
 

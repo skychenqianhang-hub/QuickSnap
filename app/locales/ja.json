@@ -22,6 +22,12 @@
   "Copy to clipboard (Enter or double-click)": "クリップボードにコピー（Enter またはダブルクリック）",
   "Cancel": "キャンセル",
   "Copy": "コピー",
-  "Drag to select · Click for the whole screen · Esc to cancel": "ドラッグで範囲選択 · クリックで画面全体 · Esc でキャンセル",
+  "Position": "座標",
+  "Color": "色",
+  "Ctrl+C: copy color": "Ctrl+C で色をコピー",
+  "Arrow keys: nudge the mouse": "矢印キーでマウスを微調整",
+  "Drag the squares to resize · Arrow keys to nudge · Enter or double-click to copy · Esc to cancel": "四角をドラッグでサイズ変更 · 矢印キーで微調整 · Enter / ダブルクリックでコピー · Esc でキャンセル",
+  "Copied {0}": "{0} をコピーしました",
+  "Click a window or the screen · Drag to select · Esc to cancel": "クリックでウィンドウ / 画面全体 · ドラッグで範囲選択 · Esc でキャンセル",
   "QuickSnap is already running — look for its icon in the tray (bottom-right of the screen).": "QuickSnap はすでに起動しています。トレイ（画面右下）のアイコンをご確認ください。"
 }

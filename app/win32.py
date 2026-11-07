@@ -182,6 +182,98 @@ def unregister_hotkey(hwnd: int, hotkey_id: int) -> None:
     user32.UnregisterHotKey(hwnd, hotkey_id)
 
 
+# ---------------------------------------------------------------- windows on screen
+
+GWL_EXSTYLE = -20
+WS_EX_TRANSPARENT = 0x20
+WS_EX_LAYERED = 0x80000
+LWA_ALPHA = 0x2
+DWMWA_EXTENDED_FRAME_BOUNDS = 9
+DWMWA_CLOAKED = 14
+
+_EnumWindowsProc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+user32.EnumWindows.argtypes = [_EnumWindowsProc, wintypes.LPARAM]
+user32.IsWindowVisible.argtypes = [wintypes.HWND]
+user32.IsIconic.argtypes = [wintypes.HWND]
+user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+user32.GetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int]
+user32.GetWindowLongPtrW.restype = ctypes.c_ssize_t
+user32.GetLayeredWindowAttributes.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD),
+                                              ctypes.POINTER(ctypes.c_ubyte), ctypes.POINTER(wintypes.DWORD)]
+user32.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
+dwmapi.DwmGetWindowAttribute.argtypes = [wintypes.HWND, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD]
+
+# The desktop background itself: clicking there means "whole screen", not a window.
+_DESKTOP_CLASSES = {"Progman", "WorkerW"}
+
+
+def cursor_pos() -> tuple[int, int]:
+    pt = wintypes.POINT()
+    user32.GetCursorPos(ctypes.byref(pt))
+    return pt.x, pt.y
+
+
+user32.SetCursorPos.argtypes = [ctypes.c_int, ctypes.c_int]
+
+
+def set_cursor_pos(x: int, y: int) -> None:
+    """Move the mouse pointer (real pixels, desktop coordinates)."""
+    user32.SetCursorPos(x, y)
+
+
+def _visible_rect(hwnd) -> tuple[int, int, int, int] | None:
+    """Window rectangle as you see it (without the invisible resize border Windows 10/11 adds)."""
+    r = wintypes.RECT()
+    if dwmapi.DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, ctypes.byref(r), ctypes.sizeof(r)) != 0:
+        if not user32.GetWindowRect(hwnd, ctypes.byref(r)):
+            return None
+    if r.right - r.left <= 0 or r.bottom - r.top <= 0:
+        return None
+    return r.left, r.top, r.right, r.bottom
+
+
+def list_windows(exclude_pid: int | None = None) -> list[tuple[int, int, int, int]]:
+    """Rectangles (left, top, right, bottom) of visible top-level windows, topmost first.
+
+    Skips minimised, hidden, click-through, fully transparent and "cloaked" windows
+    (cloaked = apps on another virtual desktop or suspended store apps), and the desktop.
+    """
+    out: list[tuple[int, int, int, int]] = []
+    cls = ctypes.create_unicode_buffer(64)
+
+    def cb(hwnd, _lp):
+        if not user32.IsWindowVisible(hwnd) or user32.IsIconic(hwnd):
+            return True
+        if exclude_pid is not None:
+            pid = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            if pid.value == exclude_pid:
+                return True
+        cloaked = wintypes.DWORD()
+        if dwmapi.DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, ctypes.byref(cloaked), 4) == 0 and cloaked.value:
+            return True
+        ex = user32.GetWindowLongPtrW(hwnd, GWL_EXSTYLE)
+        if ex & WS_EX_TRANSPARENT:
+            return True
+        if ex & WS_EX_LAYERED:
+            alpha, flags = ctypes.c_ubyte(255), wintypes.DWORD(0)
+            if (user32.GetLayeredWindowAttributes(hwnd, None, ctypes.byref(alpha), ctypes.byref(flags))
+                    and flags.value & LWA_ALPHA and alpha.value == 0):
+                return True
+        user32.GetClassNameW(hwnd, cls, 64)
+        if cls.value in _DESKTOP_CLASSES:
+            return True
+        rect = _visible_rect(hwnd)
+        if rect is not None:
+            out.append(rect)
+        return True
+
+    user32.EnumWindows(_EnumWindowsProc(cb), 0)
+    return out
+
+
 # ---------------------------------------------------------------- misc
 
 DRIVE_FIXED = 3

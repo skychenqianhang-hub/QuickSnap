@@ -48,6 +48,11 @@ def run(result_path: str) -> int:
         return "; ".join(f"{m.width}x{m.height} at ({m.left},{m.top})" + (" primary" if m.primary else "")
                          for m in mons)
 
+    def t_windows():
+        import os as _os
+        wins = win32.list_windows(exclude_pid=_os.getpid())
+        return f"{len(wins)} visible window(s) found"
+
     shots_box = {}
 
     def t_grab():
@@ -123,7 +128,7 @@ def run(result_path: str) -> int:
     def t_icon():
         assert not app_icon().isNull()
 
-    for name, fn in [("monitors", t_monitors), ("screen copy", t_grab), ("capture windows", t_overlay),
+    for name, fn in [("monitors", t_monitors), ("windows", t_windows),("screen copy", t_grab), ("capture windows", t_overlay),
                      ("clipboard", t_clipboard), ("hotkey", t_hotkey), ("settings", t_config),
                      ("save png", t_save), ("languages", t_i18n), ("icon", t_icon)]:
         if name in ("capture windows", "clipboard", "save png") and "shots" not in shots_box:
