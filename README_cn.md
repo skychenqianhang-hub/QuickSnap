@@ -29,7 +29,7 @@ Windows 托盘小工具 · 窗口 / 全屏 / 自选区域截图 · 像素放大�
 
 ## 安装
 
-1. 在 [Releases](https://github.com/skychenqianhang-hub/QuickSnap/releases/latest) 下载 `QuickSnap-Setup-x.y.z.exe` 并运行。安装包没有数字签名，Windows 可能提示「未知发布者」，点「更多信息 → 仍要运行」。
+1. 在 [Releases](https://github.com/skychenqianhang-hub/QuickSnap/releases/latest) 下载 `QuickSnap-Setup-x.y.z.exe`（约 20 MB）并运行。安装包没有数字签名，Windows 可能提示「未知发布者」，点「更多信息 → 仍要运行」。
 2. 安装时会问截图存到哪里（有 C 盘以外的硬盘时，默认推荐存在那里），以及登录 Windows 时是否自动启动。
 3. 装好后 QuickSnap 出现在托盘里（屏幕右下角），按 `Ctrl+Alt+A` 就能截图。
 
