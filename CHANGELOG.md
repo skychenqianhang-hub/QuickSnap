@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- The Save and Save as… tips now say the picture is also copied to the clipboard.
+- Toolbar tips appear below-right of the mouse pointer, clear of the arrow, and follow the mouse
+  (Windows' own tooltip was partly hidden under the pointer).
+
 ## 1.1.0 — 2026-11-09
 
 Draw on your screenshots.
