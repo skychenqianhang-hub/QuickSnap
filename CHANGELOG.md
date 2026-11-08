@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.1 — 2026-11-08
+
+- Faster start of a screenshot: the capture windows are now prepared once, right after
+  QuickSnap starts, and reused. The first screenshot after start-up no longer pays about
+  half a second for loading fonts and building the windows. Costs about 10 MB of memory.
+- A small timing log, `%APPDATA%\QuickSnap\timing.log`, records how long each step of a
+  screenshot took (times only, never picture content) to track down slow starts.
+  It keeps itself under about 100 KB.
+
 ## 1.0.0 — 2026-11-07
 
 First release with a Windows installer.

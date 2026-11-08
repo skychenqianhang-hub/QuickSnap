@@ -46,7 +46,7 @@ No administrator rights needed — it installs for the current user only. Requir
 
 ![Settings](docs/screenshots/settings-en.png)
 
-Files are named `QuickSnap_2026-11-07_13-25-30.png` (date and time; `_2`, `_3`… if taken within the same second). Settings live in `%APPDATA%\QuickSnap\config.json`. Uninstalling (Windows Settings → Apps) keeps your screenshots and settings.
+Files are named `QuickSnap_2026-11-07_13-25-30.png` (date and time; `_2`, `_3`… if taken within the same second). Settings live in `%APPDATA%\QuickSnap\config.json`; next to it, `timing.log` records how many milliseconds each screenshot step took (times only, no picture content; it stays under about 100 KB) to help find slow starts. Uninstalling (Windows Settings → Apps) keeps your screenshots and settings.
 
 QuickSnap only uses public Windows interfaces: a registered global hotkey (no keyboard hook) and a normal screen copy. It never reads other programs' memory.
 
