@@ -46,7 +46,7 @@ Windows 托盘小工具 · 窗口 / 全屏 / 自选区域截图 · 像素放大�
 
 ![设置](docs/screenshots/settings-zh.png)
 
-截图文件名是 `QuickSnap_2026-11-07_13-25-30.png`（日期和时间；同一秒内截多张会加 `_2`、`_3`……）。设置保存在 `%APPDATA%\QuickSnap\config.json`。卸载（Windows 设置 → 应用）不会删除你的截图和设置。
+截图文件名是 `QuickSnap_2026-11-07_13-25-30.png`（日期和时间；同一秒内截多张会加 `_2`、`_3`……）。设置保存在 `%APPDATA%\QuickSnap\config.json`；同一个文件夹里的 `timing.log` 记录每次截图各步骤花了多少毫秒（只记时间，不记截图内容，最多约 100 KB），用来排查弹出慢的问题。卸载（Windows 设置 → 应用）不会删除你的截图和设置。
 
 QuickSnap 只用 Windows 公开的接口：注册全局快捷键（不装键盘钩子）和普通的屏幕复制，不读取其他程序的内存。
 
