@@ -10,7 +10,7 @@ from PySide6.QtCore import QObject, QTimer, QUrl
 from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import QFileDialog, QMenu, QSystemTrayIcon
 
-from . import autostart, capture, i18n, timing, win32
+from . import annotate, autostart, capture, i18n, timing, win32
 from .config import APP_NAME, DEFAULTS, Config
 from .hotkey import HotkeyManager, normalize
 from .i18n import tr
@@ -60,6 +60,7 @@ class Controller(QObject):
         except OSError:
             pass
 
+        self._load_draw_prefs()
         self.hotkey_ok = self._register_hotkey()
         if not self.hotkey_ok:
             self.notify(tr("Shortcut unavailable"),
@@ -252,6 +253,20 @@ class Controller(QObject):
             self.session.close()
             self.session.deleteLater()
             self.session = None
+        self._save_draw_prefs()
+
+    def _load_draw_prefs(self) -> None:
+        color = str(self.config["draw_color"]).upper()
+        size = self.config["draw_size"]
+        annotate.prefs["color"] = color if color in annotate.PALETTE else annotate.PALETTE[0]
+        annotate.prefs["size"] = size if size in (0, 1, 2) else 1
+
+    def _save_draw_prefs(self) -> None:
+        """Remember the colour / thickness used last time (only writes when they changed)."""
+        if self.config["draw_color"] != annotate.prefs["color"]:
+            self.config["draw_color"] = annotate.prefs["color"]
+        if self.config["draw_size"] != annotate.prefs["size"]:
+            self.config["draw_size"] = annotate.prefs["size"]
 
     def _on_finished(self, action: str, image) -> None:
         if action == "cancel" or image is None:

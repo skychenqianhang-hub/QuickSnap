@@ -326,6 +326,99 @@ sw.autostart_box.setChecked(True)
 check("auto-start checkbox calls through", fc.auto is True and sw.autostart_status.isVisibleTo(sw))
 sw.close()
 
+# --- stage 5a: drawing on the picture
+from app import annotate  # noqa: E402
+
+annotate.prefs.update({"color": "#FF3B30", "size": 1})
+plain = QImage(W, H, QImage.Format.Format_RGB32)
+plain.fill(QColor("#808080"))
+s5 = CaptureSession([], [])
+ov = s5.overlays[0]
+ov.set_shot(MonitorShot(mon, plain))
+ov.resize(W, H)
+ov.select(QRect(100, 100, 400, 300))
+ov.set_tool("rect")
+check("tool picked: options strip shown", ov.options.isVisibleTo(ov) and ov.toolbar.tool_buttons["rect"].isChecked())
+QTest.mousePress(ov, Qt.MouseButton.LeftButton, pos=QPoint(150, 150))
+QTest.mouseMove(ov, QPoint(250, 220))
+QTest.mouseRelease(ov, Qt.MouseButton.LeftButton, pos=QPoint(250, 220))
+check("drag draws a box", len(ov.shapes) == 1 and ov.shapes[0].kind == "rect")
+img5 = ov.cropped()
+check("copied picture keeps its size", (img5.width(), img5.height()) == (400, 300))
+check("drawing is on the copied picture", img5.pixelColor(50, 85) == QColor("#FF3B30"))
+check("inside the drawn box untouched", img5.pixelColor(100, 85) == QColor("#808080"))
+check("box locked after drawing", ov.locked and ov._part_under(QPointF(500, 400)) == "")
+QTest.mouseClick(ov, Qt.MouseButton.LeftButton, pos=QPoint(20, 20))
+check("click outside the box keeps everything", ov.sel == QRect(100, 100, 400, 300) and len(ov.shapes) == 1)
+QTest.mouseClick(ov, Qt.MouseButton.LeftButton, pos=QPoint(300, 300))
+check("tiny click draws nothing", len(ov.shapes) == 1)
+ov.set_tool("arrow")
+QTest.mousePress(ov, Qt.MouseButton.LeftButton, pos=QPoint(300, 300))
+QTest.mouseMove(ov, QPoint(450, 360))
+QTest.mouseRelease(ov, Qt.MouseButton.LeftButton, pos=QPoint(450, 360))
+ov.set_tool("ellipse")
+QTest.mousePress(ov, Qt.MouseButton.LeftButton, pos=QPoint(120, 300))
+QTest.mouseMove(ov, QPoint(200, 380))
+QTest.mouseRelease(ov, Qt.MouseButton.LeftButton, pos=QPoint(200, 380))
+ov.set_tool("pen")
+QTest.mousePress(ov, Qt.MouseButton.LeftButton, pos=QPoint(130, 130))
+for k in range(1, 8):
+    QTest.mouseMove(ov, QPoint(130 + 10 * k, 130 + (k % 2) * 6))
+QTest.mouseRelease(ov, Qt.MouseButton.LeftButton, pos=QPoint(200, 130))
+check("arrow, circle and pen drawn", [s.kind for s in ov.shapes] == ["rect", "arrow", "ellipse", "pen"])
+check("pen keeps its path", len(ov.shapes[-1].points) >= 6)
+QTest.mousePress(ov, Qt.MouseButton.LeftButton, pos=QPoint(480, 380))
+QTest.mouseMove(ov, QPoint(900, 900))
+QTest.mouseRelease(ov, Qt.MouseButton.LeftButton, pos=QPoint(900, 900))
+check("drawing stays inside the box", all(100 <= pt.x() <= 500 and 100 <= pt.y() <= 400
+                                          for pt in ov.shapes[-1].points))
+QTest.keyClick(ov, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)
+check("Ctrl+Z removes the last drawing", len(ov.shapes) == 4)
+before = QRect(ov.sel)
+QTest.keyClick(ov, Qt.Key.Key_Right)
+check("arrow keys don't move a locked box", ov.sel == before)
+ov.options._pick_color("#007AFF")
+ov.options._pick_size(2)
+ov.set_tool("rect")
+QTest.mousePress(ov, Qt.MouseButton.LeftButton, pos=QPoint(300, 120))
+QTest.mouseMove(ov, QPoint(360, 180))
+QTest.mouseRelease(ov, Qt.MouseButton.LeftButton, pos=QPoint(360, 180))
+check("new colour and thickness used", ov.shapes[-1].color == "#007AFF" and ov.shapes[-1].width == 7.0)
+QTest.mouseClick(ov, Qt.MouseButton.RightButton, pos=QPoint(300, 300))
+check("first right-click puts the tool down, drawings stay", ov.tool is None and len(ov.shapes) == 5)
+for _ in range(5):
+    ov.undo()
+check("undo everything unlocks the box", not ov.locked and ov._part_under(QPointF(500, 250)) == "r")
+ov.set_tool("pen")
+QTest.mouseClick(ov, Qt.MouseButton.LeftButton, pos=QPoint(250, 250))
+QTest.mouseClick(ov, Qt.MouseButton.RightButton, pos=QPoint(250, 250))
+QTest.mouseClick(ov, Qt.MouseButton.RightButton, pos=QPoint(250, 250))
+check("second right-click picks again and drops the drawings", ov.sel is None and ov.shapes == [])
+s5.close()
+
+# 150% scaling: lines look the same thickness, drawings land on the right real pixels
+annotate.prefs.update({"color": "#FF3B30", "size": 1})
+small = QImage(300, 200, QImage.Format.Format_RGB32)
+small.fill(QColor("#808080"))
+s6 = CaptureSession([], [])
+ov = s6.overlays[0]
+ov.set_shot(MonitorShot(win32.Monitor(0, 0, 0, 300, 200, True), small))
+ov.resize(200, 133)
+ov.select(QRect(0, 0, 300, 200))
+ov.set_tool("rect")
+QTest.mousePress(ov, Qt.MouseButton.LeftButton, pos=QPoint(20, 20))
+QTest.mouseMove(ov, QPoint(100, 80))
+QTest.mouseRelease(ov, Qt.MouseButton.LeftButton, pos=QPoint(100, 80))
+sh = ov.shapes[0]
+check("150%: line width in real pixels", abs(sh.width - 6.0) < 0.01)
+check("150%: corners in real pixels", (round(sh.points[0].x()), round(sh.points[0].y())) == (30, 30)
+      and (round(sh.points[1].x()), round(sh.points[1].y())) == (150, 120))
+check("150%: drawing on the copied picture", ov.cropped().pixelColor(30, 75) == QColor("#FF3B30"))
+s6.close()
+
+check("arrow head never longer than the arrow",
+      annotate.arrow_geometry(QPointF(0, 0), QPointF(10, 0), 7)[1].boundingRect().width() <= 6.01)
+
 # --- speed-up: ready-made capture windows are reused; pictures are not kept
 from app.overlay import OverlayPool  # noqa: E402
 
@@ -337,7 +430,12 @@ for round_no in range(3):
     ses.finished.connect(lambda a, im: results.append(a))
     ov = ses.overlays[0]
     ov.set_shot(MonitorShot(mon, big))
-    check(f"pool round {round_no + 1}: starts clean", ov.sel is None and ov.hover is None and ov._mode is None)
+    check(f"pool round {round_no + 1}: starts clean", ov.sel is None and ov.hover is None and ov._mode is None
+          and ov.shapes == [] and ov.tool is None and not ov.options.isVisibleTo(ov))
+    if round_no == 0:
+        ov.select(QRect(10, 10, 50, 40))
+        ov.set_tool("pen")
+        ov.shapes.append(annotate.Shape("pen", "#FF3B30", 4, [QPointF(20, 20)]))
     ov.select(QRect(10, 10, 50, 40))
     QTest.keyClick(ov, Qt.Key.Key_Return)
     ses.close()

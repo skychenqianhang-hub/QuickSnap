@@ -100,6 +100,22 @@ def run(result_path: str) -> int:
             pool.close()
         return f"built in {built:.0f} ms once, reused in {reuse:.1f} ms"
 
+    def t_draw():
+        from PySide6.QtCore import QPoint as _P, QPointF as _F
+        from PySide6.QtGui import QColor as _C, QImage as _I
+        from app import annotate
+        pic = _I(200, 120, _I.Format.Format_RGB32)
+        pic.fill(_C("#808080"))
+        shapes = [annotate.Shape("rect", "#FF3B30", 4, [_F(110, 110), _F(190, 170)]),
+                  annotate.Shape("arrow", "#007AFF", 4, [_F(120, 200), _F(260, 140)]),
+                  annotate.Shape("ellipse", "#34C759", 4, [_F(200, 120), _F(280, 190)]),
+                  annotate.Shape("pen", "#FFCC00", 4, [_F(110, 210), _F(150, 215), _F(190, 205)])]
+        out = annotate.render(pic, shapes, _P(100, 100))   # crop starts at (100, 100)
+        assert (out.width(), out.height()) == (200, 120)
+        assert out.pixelColor(10, 40) == _C("#FF3B30"), out.pixelColor(10, 40).name()
+        assert out.pixelColor(50, 40) == _C("#808080")
+        return "box / arrow / circle / pen painted onto the picture"
+
     def t_clipboard():
         img = shots_box["shots"][0].image.copy(0, 0, 64, 48)
         cb = app.clipboard()
@@ -186,7 +202,7 @@ def run(result_path: str) -> int:
         return "builds in en / zh / ja"
 
     for name, fn in [("monitors", t_monitors), ("windows", t_windows), ("screen copy", t_grab),
-                     ("capture windows", t_overlay), ("ready-made capture windows", t_pool),
+                     ("capture windows", t_overlay), ("ready-made capture windows", t_pool), ("drawing", t_draw),
                      ("clipboard", t_clipboard), ("hotkey", t_hotkey), ("settings", t_config),
                      ("save png", t_save), ("languages", t_i18n), ("icon", t_icon),
                      ("start with Windows", t_autostart), ("settings window", t_settings)]:

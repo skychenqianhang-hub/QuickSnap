@@ -12,6 +12,8 @@ DEFAULTS = {
     "language": "en",
     "hotkey": "Ctrl+Alt+A",
     "save_dir": "",  # filled on first run by default_save_dir()
+    "draw_color": "#FF3B30",   # last colour used for drawing on screenshots
+    "draw_size": 1,            # 0 thin / 1 medium / 2 thick
 }
 
 

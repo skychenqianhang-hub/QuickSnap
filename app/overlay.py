@@ -5,6 +5,8 @@
     drag           draw your own box
     after picking  drag the 8 little squares to resize, drag inside to move,
                    arrow keys nudge by 1 pixel (Shift = 10); toolbar: Copy / Save / Save as / Cancel
+    drawing        toolbar tools box / circle / arrow / pen (+ colour and thickness strip),
+                   Ctrl+Z undo; once something is drawn the box is locked (app/annotate.py)
 
 One borderless always-on-top window per monitor. Each shows a frozen picture
 of its monitor taken just before it opened, so what you pick is exactly what
@@ -16,11 +18,12 @@ placed at 125% / 150% display scaling.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QObject, QPoint, QPointF, QRect, QRectF, Qt, QTimer, Signal
+from PySide6.QtCore import QObject, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (QColor, QCursor, QFont, QGuiApplication, QImage, QKeySequence, QPainter, QPen,
                            QPixmap)
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QToolButton, QWidget
 
+from . import annotate
 from . import selection as geo
 from . import win32
 from .capture import MonitorShot
@@ -48,24 +51,67 @@ _CURSORS = {
 }
 
 
+_BAR_STYLE = (
+    "#snapToolbar, #snapOptions { background: #2b2b2b; border: 1px solid #444; border-radius: 6px; }"
+    "QToolButton { color: #f2f2f2; background: transparent; border: 1px solid transparent;"
+    " padding: 5px 10px; font-size: 13px; border-radius: 4px; }"
+    "QToolButton:hover { background: #3d3d3d; }"
+    "QToolButton:checked { background: #1f4f80; border-color: #2F9BFF; }"
+    "QToolButton:disabled { color: #777; }"
+    "QToolButton#toolBtn, QToolButton#sizeBtn { padding: 5px 7px; }"
+    "QToolButton#copyBtn { color: #4cd964; font-weight: bold; }"
+    "QToolButton#cancelBtn { color: #ff6b6b; }"
+    "QFrame#barSep { background: #4a4a4a; }"
+)
+
+
+def _separator(parent: QWidget) -> QFrame:
+    sep = QFrame(parent)
+    sep.setObjectName("barSep")
+    sep.setFixedSize(1, 20)
+    return sep
+
+
 class Toolbar(QFrame):
-    action = Signal(str)  # "copy" / "save" / "save_as" / "cancel"
+    """[box][circle][arrow][pen] [undo] | Save as… Save ✕ Cancel ✓ Copy"""
+
+    action = Signal(str)        # "copy" / "save" / "save_as" / "cancel"
+    tool_clicked = Signal(str)  # "rect" / "ellipse" / "arrow" / "pen"
+    undo_clicked = Signal()
 
     def __init__(self, parent: QWidget):
         super().__init__(parent)
         self.setObjectName("snapToolbar")
-        self.setStyleSheet(
-            "#snapToolbar { background: #2b2b2b; border: 1px solid #444; border-radius: 6px; }"
-            "QToolButton { color: #f2f2f2; background: transparent; border: none;"
-            " padding: 5px 10px; font-size: 13px; border-radius: 4px; }"
-            "QToolButton:hover { background: #3d3d3d; }"
-            "QToolButton#copyBtn { color: #4cd964; font-weight: bold; }"
-            "QToolButton#cancelBtn { color: #ff6b6b; }"
-        )
+        self.setStyleSheet(_BAR_STYLE)
         self.setCursor(Qt.CursorShape.ArrowCursor)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(4, 3, 4, 3)
         lay.setSpacing(2)
+        self.tool_buttons: dict[str, QToolButton] = {}
+        for kind, tip in [("rect", tr("Box")), ("ellipse", tr("Circle")), ("arrow", tr("Arrow")),
+                          ("pen", tr("Pen"))]:
+            b = QToolButton(self)
+            b.setObjectName("toolBtn")
+            b.setIcon(annotate.tool_icon(kind))
+            b.setIconSize(QSize(18, 18))
+            b.setCheckable(True)
+            b.setToolTip(tip)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.clicked.connect(lambda _=False, k=kind: self.tool_clicked.emit(k))
+            lay.addWidget(b)
+            self.tool_buttons[kind] = b
+        self.undo_button = QToolButton(self)
+        self.undo_button.setObjectName("toolBtn")
+        self.undo_button.setIcon(annotate.tool_icon("undo"))
+        self.undo_button.setIconSize(QSize(18, 18))
+        self.undo_button.setToolTip(tr("Undo (Ctrl+Z)"))
+        self.undo_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.undo_button.setEnabled(False)
+        self.undo_button.clicked.connect(self.undo_clicked)
+        lay.addWidget(self.undo_button)
+        lay.addSpacing(4)
+        lay.addWidget(_separator(self))
+        lay.addSpacing(4)
         for key, text, tip, name in [
             ("save_as", tr("Save as…"), tr("Choose a folder and file name"), "saveAsBtn"),
             ("save", tr("Save"), tr("Save to the screenshot folder (Ctrl+S)"), "saveBtn"),
@@ -80,6 +126,71 @@ class Toolbar(QFrame):
             b.clicked.connect(lambda _=False, k=key: self.action.emit(k))
             lay.addWidget(b)
         self.adjustSize()
+
+    def show_tool(self, kind: str | None) -> None:
+        for k, b in self.tool_buttons.items():
+            b.setChecked(k == kind)
+
+
+class ToolOptions(QFrame):
+    """Line thickness (3 dots) and colour (8 swatches) for the drawing tools."""
+
+    changed = Signal()
+
+    def __init__(self, parent: QWidget):
+        super().__init__(parent)
+        self.setObjectName("snapOptions")
+        self.setStyleSheet(_BAR_STYLE)
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(4, 3, 6, 3)
+        lay.setSpacing(2)
+        self.size_buttons = []
+        for i, tip in enumerate([tr("Thin"), tr("Medium"), tr("Thick")]):
+            b = QToolButton(self)
+            b.setObjectName("sizeBtn")
+            b.setIcon(annotate.size_icon(i))
+            b.setIconSize(QSize(18, 18))
+            b.setCheckable(True)
+            b.setToolTip(tip)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.clicked.connect(lambda _=False, n=i: self._pick_size(n))
+            lay.addWidget(b)
+            self.size_buttons.append(b)
+        lay.addSpacing(4)
+        lay.addWidget(_separator(self))
+        lay.addSpacing(6)
+        self.color_buttons = []
+        for c in annotate.PALETTE:
+            b = QToolButton(self)
+            b.setCheckable(True)
+            b.setFixedSize(20, 20)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setStyleSheet(f"QToolButton {{ background: {c}; border: 2px solid #555; border-radius: 3px; padding: 0; }}"
+                            f"QToolButton:checked {{ border: 2px solid #ffffff; }}"
+                            f"QToolButton:hover {{ border: 2px solid #bbbbbb; }}")
+            b.clicked.connect(lambda _=False, col=c: self._pick_color(col))
+            lay.addWidget(b)
+            self.color_buttons.append((c, b))
+        self.sync()
+        self.adjustSize()
+
+    def sync(self) -> None:
+        """Show the current choice (annotate.prefs) as pressed buttons."""
+        for i, b in enumerate(self.size_buttons):
+            b.setChecked(i == annotate.prefs["size"])
+        for c, b in self.color_buttons:
+            b.setChecked(c.upper() == str(annotate.prefs["color"]).upper())
+
+    def _pick_size(self, n: int) -> None:
+        annotate.prefs["size"] = n
+        self.sync()
+        self.changed.emit()
+
+    def _pick_color(self, color: str) -> None:
+        annotate.prefs["color"] = color
+        self.sync()
+        self.changed.emit()
 
 
 class Overlay(QWidget):
@@ -109,9 +220,16 @@ class Overlay(QWidget):
         self._copied: str | None = None          # "Copied #RRGGBB" feedback text
         self._copied_timer = QTimer(self, singleShot=True, interval=1500)
         self._copied_timer.timeout.connect(self._clear_copied)
+        self.tool: str | None = None             # drawing tool in use, None = adjusting the box
+        self.shapes: list[annotate.Shape] = []   # what has been drawn (real pixels, this monitor)
+        self._shape: annotate.Shape | None = None  # the one being drawn right now
         self.toolbar = Toolbar(self)
         self.toolbar.hide()
         self.toolbar.action.connect(self.action)
+        self.toolbar.tool_clicked.connect(self.toggle_tool)
+        self.toolbar.undo_clicked.connect(self.undo)
+        self.options = ToolOptions(self)
+        self.options.hide()
         self._match_monitor()
 
     # ---- which frozen picture belongs to this window
@@ -145,6 +263,7 @@ class Overlay(QWidget):
         self.cursor_px = None
         self._copied = None
         self._copied_timer.stop()
+        self._clear_drawing()
         self.toolbar.hide()
         self.setCursor(Qt.CursorShape.ArrowCursor)
         self._report_paint = True
@@ -158,6 +277,8 @@ class Overlay(QWidget):
         """Load fonts, styles and the toolbar once, off screen (nothing is shown)."""
         self.toolbar.ensurePolished()
         self.toolbar.grab()
+        self.options.ensurePolished()
+        self.options.grab()
         img = QImage(400, 80, QImage.Format.Format_RGB32)
         p = QPainter(img)
         self._draw_label(p, "1920 × 1080", QPointF(10, 40))
@@ -225,18 +346,92 @@ class Overlay(QWidget):
         self.update()
 
     def magnifier_visible(self) -> bool:
-        """While hovering, drawing a box or dragging an edge; not while moving or after picking."""
+        """While hovering, drawing a box or dragging an edge; not while moving, after picking
+        or while drawing on the picture."""
         if self.cursor_px is None or self.shot is None:
             return False
         if self._mode in (None, "pending"):
             return self.sel is None
-        return self._mode != "move"
+        return self._mode not in ("move", "draw")
+
+    # ---- drawing on the picture
+
+    @property
+    def locked(self) -> bool:
+        """Once something is drawn the box stays put (moving it would misplace the drawings)."""
+        return bool(self.shapes)
+
+    def toggle_tool(self, kind: str) -> None:
+        self.set_tool(None if self.tool == kind else kind)
+
+    def set_tool(self, kind: str | None) -> None:
+        self.tool = kind
+        self.toolbar.show_tool(kind)
+        if kind is None:
+            self.options.hide()
+        else:
+            self.options.sync()
+            self._place_toolbar()
+            self.options.show()
+            self.options.raise_()
+        self.setFocus()  # keep Esc / Enter / Ctrl+Z working after clicking a button
+        self.update()
+
+    def undo(self) -> None:
+        if self.shapes:
+            self.shapes.pop()
+            self.toolbar.undo_button.setEnabled(bool(self.shapes))
+            self.update()
+
+    def _clear_drawing(self) -> None:
+        self.shapes = []
+        self._shape = None
+        self.tool = None
+        self.toolbar.show_tool(None)
+        self.toolbar.undo_button.setEnabled(False)
+        self.options.hide()
+
+    def _clamp_to_sel(self, p: QPointF) -> QPointF:
+        r = self.sel
+        return QPointF(min(max(p.x(), r.left()), r.left() + r.width()),
+                       min(max(p.y(), r.top()), r.top() + r.height()))
+
+    def _real_f(self, pos: QPointF) -> QPointF:
+        """Mouse position in real pixels, keeping fractions (smooth pen lines)."""
+        sx, sy = self._scale()
+        return QPointF(pos.x() * sx, pos.y() * sy)
+
+    def _start_shape(self, pos: QPointF) -> None:
+        sx, _ = self._scale()
+        width = annotate.SIZES[annotate.prefs["size"]] * sx    # same look on any scaling
+        start = self._clamp_to_sel(self._real_f(pos))
+        self._shape = annotate.Shape(self.tool, annotate.prefs["color"], width, [start, QPointF(start)])
+        if self.tool == "pen":
+            self._shape.points = [start]
+        self._mode = "draw"
+
+    def _extend_shape(self, pos: QPointF) -> None:
+        p = self._clamp_to_sel(self._real_f(pos))
+        if self._shape.kind == "pen":
+            last = self._shape.points[-1]
+            if abs(p.x() - last.x()) + abs(p.y() - last.y()) >= 1.0:
+                self._shape.points.append(p)
+        else:
+            self._shape.points[-1] = p
+
+    def _finish_shape(self) -> None:
+        if self._shape is not None and self._shape.is_meaningful():
+            self.shapes.append(self._shape)
+            self.toolbar.undo_button.setEnabled(True)
+        self._shape = None
+        self._mode = None
 
     # ---- selection
 
     def clear_selection(self) -> None:
         self.sel = None
         self._mode = None
+        self._clear_drawing()
         self.toolbar.hide()
         self.setCursor(Qt.CursorShape.ArrowCursor)
         self.update()
@@ -271,22 +466,38 @@ class Overlay(QWidget):
         x = min(max(x, 0), self.width() - tb.width())
         y = min(max(y, 0), self.height() - tb.height())
         self.toolbar.setGeometry(round(x), round(y), tb.width(), tb.height())
+        # the colour / thickness strip goes on the far side of the toolbar, away from the box
+        op = self.options.sizeHint()
+        ox = min(max(x, 0), self.width() - op.width())
+        toolbar_above_box = y + tb.height() <= r.top()
+        oy_below, oy_above = y + tb.height() + 4, y - 4 - op.height()
+        if toolbar_above_box:
+            oy = oy_above if oy_above >= 0 else oy_below
+        else:
+            oy = oy_below if oy_below + op.height() <= self.height() else oy_above
+        self.options.setGeometry(round(ox), round(min(max(oy, 0), self.height() - op.height())),
+                                 op.width(), op.height())
 
     def cropped(self):
+        """The picked area, with the drawings on it, in real pixels."""
         if self.shot is None or self.sel is None or self.sel.isEmpty():
             return None
-        return self.shot.image.copy(self.sel)
+        return annotate.render(self.shot.image.copy(self.sel), self.shapes, self.sel.topLeft())
 
     def _part_under(self, pos: QPointF) -> str:
-        if self.sel is None:
-            return ""
+        if self.sel is None or self.locked or self.tool is not None:
+            return ""          # drawing / drawn: the box can't be resized or moved
         return geo.hit_test(self.to_logical(self.sel), pos, GRAB_TOL)
 
     # ---- mouse
 
     def mousePressEvent(self, e):
         if e.button() == Qt.MouseButton.RightButton:
-            if self.sel is not None or self._mode is not None:
+            if self._mode == "draw":
+                return
+            if self.tool is not None:                  # first right-click just puts the tool down
+                self.set_tool(None)
+            elif self.sel is not None or self._mode is not None:
                 self.clear_selection()
                 self.hover = self.window_at(self.to_real(e.position()))
                 self.update()
@@ -295,6 +506,11 @@ class Overlay(QWidget):
             return
         if e.button() != Qt.MouseButton.LeftButton:
             return
+        if self.sel is not None and (self.tool is not None or self.locked):
+            if self.tool is not None and self.to_logical(self.sel).contains(e.position()):
+                self._start_shape(e.position())
+                self.update()
+            return                                     # outside the box: keep the drawings, do nothing
         p = self.to_real(e.position())
         self._press = p
         part = self._part_under(e.position())
@@ -314,6 +530,10 @@ class Overlay(QWidget):
         p = self.to_real(e.position())
         self.cursor_px = self.pixel_under(e.position())
         mode = self._mode
+        if mode == "draw":
+            self._extend_shape(e.position())
+            self.update()
+            return
         if mode is None:
             if self.sel is None:
                 new_hover = self.window_at(p)
@@ -343,6 +563,11 @@ class Overlay(QWidget):
         if e.button() != Qt.MouseButton.LeftButton or self._mode is None:
             return
         mode = self._mode
+        if mode == "draw":
+            self._extend_shape(e.position())
+            self._finish_shape()
+            self.update()
+            return
         if mode == "pending":
             self.select(self.window_at(self._press))   # a click takes the window / screen
         elif mode == "new":
@@ -357,6 +582,9 @@ class Overlay(QWidget):
         self.setCursor(_CURSORS.get(self._part_under(e.position()), Qt.CursorShape.ArrowCursor))
 
     def mouseDoubleClickEvent(self, e):
+        if self.tool is not None:                      # while drawing a double-click is just two clicks
+            self.mousePressEvent(e)
+            return
         if (e.button() == Qt.MouseButton.LeftButton and self.sel is not None
                 and self.sel.contains(self.to_real(e.position()))):
             self.action.emit("copy")
@@ -381,13 +609,17 @@ class Overlay(QWidget):
             step = 10 if e.modifiers() & Qt.KeyboardModifier.ShiftModifier else 1
             dx = {Qt.Key.Key_Left: -step, Qt.Key.Key_Right: step}.get(k, 0)
             dy = {Qt.Key.Key_Up: -step, Qt.Key.Key_Down: step}.get(k, 0)
-            if self.sel is not None and self._mode is None:   # a box is picked: nudge the box
-                self.sel = geo.move(self.sel, dx, dy, self.bounds())
-                self._place_toolbar()
-                self.update()
-            else:                                             # otherwise nudge the mouse pointer
+            if self.sel is not None:
+                if self._mode is None and not self.locked and self.tool is None:  # nudge the box
+                    self.sel = geo.move(self.sel, dx, dy, self.bounds())
+                    self._place_toolbar()
+                    self.update()
+            else:                                             # no box yet: nudge the mouse pointer
                 cx, cy = win32.cursor_pos()
                 win32.set_cursor_pos(cx + dx, cy + dy)
+        elif self.sel is not None and e.matches(QKeySequence.StandardKey.Undo):
+            if self._mode is None:
+                self.undo()
         elif self.sel is None:
             if e.matches(QKeySequence.StandardKey.Copy):
                 self.copy_color()
@@ -420,21 +652,42 @@ class Overlay(QWidget):
             p.setBrush(Qt.BrushStyle.NoBrush)
             # keep the border visible when the box is the whole screen
             p.drawRect(r.adjusted(1, 1, -1, -1) if box == self.bounds() else r)
+            if self.sel is not None and (self.shapes or self._shape is not None):
+                self._draw_shapes(p, r)
             self._draw_label(p, f"{box.width()} × {box.height()}", r.topLeft())
-            if self.sel is not None:
+            if self.sel is not None and not self.locked and self.tool is None:
                 self._draw_handles(p, r)
         if self.sel is None and self._mode in (None, "pending") and self.cursor_px is not None:
             self._draw_banner(p, tr("Click a window or the screen · Drag to select · Esc to cancel"))
         elif self.sel is not None and self._mode is None:
-            self._draw_banner(p, tr("Drag the squares to resize · Arrow keys to nudge · "
-                                    "Enter or double-click to copy · Esc to cancel"),
-                              [self.to_logical(self.sel), QRectF(self.toolbar.geometry())])
+            avoid = [self.to_logical(self.sel), QRectF(self.toolbar.geometry())]
+            if self.options.isVisible():
+                avoid.append(QRectF(self.options.geometry()))
+            if self.tool is not None:
+                text = tr("Drag inside the box to draw · Ctrl+Z to undo · "
+                          "Right-click or click the tool again to stop drawing")
+            elif self.locked:
+                text = tr("Enter or double-click to copy · Ctrl+Z to undo · Esc to cancel")
+            else:
+                text = tr("Drag the squares to resize · Arrow keys to nudge · "
+                          "Enter or double-click to copy · Esc to cancel")
+            self._draw_banner(p, text, avoid)
         if self.magnifier_visible():
             self._draw_magnifier(p)
         p.end()
         if self._report_paint and self.shot is not None and self.isVisible():
             self._report_paint = False
             self.first_painted.emit()
+
+    def _draw_shapes(self, p: QPainter, sel_logical: QRectF) -> None:
+        """Shapes are in real pixels: scale them down to the screen, clipped to the box."""
+        sx, sy = self._scale()
+        p.save()
+        p.setClipRect(sel_logical)
+        p.scale(1 / sx, 1 / sy)
+        shapes = self.shapes + ([self._shape] if self._shape is not None else [])
+        annotate.paint_shapes(p, shapes)
+        p.restore()
 
     def _cursor_logical(self) -> QPointF:
         sx, sy = self._scale()

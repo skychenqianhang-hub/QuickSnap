@@ -19,7 +19,7 @@ from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 app = QApplication(sys.argv)
-from app import i18n, win32  # noqa: E402
+from app import annotate, i18n, win32  # noqa: E402
 from app.capture import MonitorShot  # noqa: E402
 from app.overlay import CaptureSession  # noqa: E402
 from app.settings_window import SettingsWindow  # noqa: E402
@@ -155,6 +155,22 @@ def capture_states(lang: str) -> None:
     ov.select(QRect(1140, 360, 520, 352))
     QTest.qWait(50)
     ov.grab().save(str(OUT / f"capture-selected-{lang}.png"))
+
+    # 4) drawing: a circle around the tallest bar, an arrow pointing at it, a box, a pen underline
+    ov.select(QRect(1110, 320, 600, 400))
+    annotate.prefs.update({"color": "#FF3B30", "size": 1})
+    ov.set_tool("ellipse")
+    ov.shapes = [
+        annotate.Shape("ellipse", "#FF3B30", 4, [QPointF(1488, 335), QPointF(1582, 700)]),
+        annotate.Shape("arrow", "#FF3B30", 4, [QPointF(1300, 400), QPointF(1478, 470)]),
+        annotate.Shape("rect", "#FFCC00", 4, [QPointF(1145, 488), QPointF(1235, 712)]),
+        annotate.Shape("pen", "#007AFF", 4, [QPointF(1500 + k * 6, 712 + (3 if k % 2 else -3))
+                                             for k in range(12)]),
+    ]
+    ov.toolbar.undo_button.setEnabled(True)
+    QTest.qWait(50)
+    ov.grab().save(str(OUT / f"capture-draw-{lang}.png"))
+    ov.cropped().save(str(OUT / f"result-draw-{lang}.png"))   # what gets copied / saved
     session.close()
 
 
