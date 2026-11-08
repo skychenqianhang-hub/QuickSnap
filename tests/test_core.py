@@ -416,6 +416,71 @@ check("150%: corners in real pixels", (round(sh.points[0].x()), round(sh.points[
 check("150%: drawing on the copied picture", ov.cropped().pixelColor(30, 75) == QColor("#FF3B30"))
 s6.close()
 
+# --- stage 5b: text and mosaic
+annotate.prefs.update({"color": "#FFFFFF", "size": 1})
+striped = QImage(W, H, QImage.Format.Format_RGB32)
+striped.fill(QColor("#404040"))
+for x in range(0, 600, 2):
+    for y in range(300, 400):
+        striped.setPixelColor(x, y, QColor("#E0E0E0"))
+s7 = CaptureSession([], [])
+done7 = []
+s7.finished.connect(lambda a, im: done7.append(a))
+ov = s7.overlays[0]
+ov.set_shot(MonitorShot(mon, striped))
+ov.resize(W, H)
+ov.select(QRect(100, 100, 500, 300))
+ov.set_tool("text")
+check("text tool: sizes shown as letters", ov.options.size_buttons[0].toolTip() == "Small")
+ed = ov.text_edit
+QTest.mouseClick(ov, Qt.MouseButton.LeftButton, pos=QPoint(150, 150))
+check("click opens the text box", ed.isVisibleTo(ov))
+QTest.keyClicks(ed, "Hi")
+QTest.keyClick(ed, Qt.Key.Key_Return)
+check("Enter finishes the text", ov.shapes and ov.shapes[-1].kind == "text" and ov.shapes[-1].text == "Hi"
+      and not ed.isVisibleTo(ov))
+QTest.mouseClick(ov, Qt.MouseButton.LeftButton, pos=QPoint(150, 200))
+ed.insertPlainText("你好世界")                      # what a Chinese input method delivers
+QTest.mouseClick(ov, Qt.MouseButton.LeftButton, pos=QPoint(400, 200))
+check("clicking elsewhere keeps the Chinese text", ov.shapes[-1].text == "你好世界" and ed.isVisibleTo(ov))
+QTest.keyClicks(ed, "dropped")
+QTest.keyClick(ed, Qt.Key.Key_Escape)
+check("Esc drops only this text", len(ov.shapes) == 2 and not ed.isVisibleTo(ov) and done7 == [])
+QTest.mouseClick(ov, Qt.MouseButton.LeftButton, pos=QPoint(150, 260))
+QTest.keyClicks(ed, "a")
+QTest.keyClick(ed, Qt.Key.Key_Return, Qt.KeyboardModifier.ShiftModifier)
+QTest.keyClicks(ed, "b")
+ov.options._pick_color("#34C759")
+check("colour change applies while typing", ed.color == "#34C759")
+QTest.keyClick(ed, Qt.Key.Key_Return)
+check("Shift+Enter makes a new line", ov.shapes[-1].text == "a\nb" and ov.shapes[-1].color == "#34C759")
+QTest.mouseClick(ov, Qt.MouseButton.LeftButton, pos=QPoint(450, 120))
+QTest.keyClicks(ed, "Z")
+pic7 = ov.cropped()
+check("copying while typing includes the text", ov.shapes[-1].text == "Z" and not ed.isVisibleTo(ov))
+light = sum(pic7.pixelColor(x, y) == QColor("#FFFFFF") for x in range(40, 120) for y in range(30, 70))
+check("text is on the copied picture", light > 20)
+QTest.mouseClick(ov, Qt.MouseButton.LeftButton, pos=QPoint(450, 160))
+QTest.keyClicks(ed, "x")
+ov.undo()
+check("undo while typing drops the text box first", not ed.isVisibleTo(ov) and ov.shapes[-1].text == "Z")
+ov.set_tool("mosaic")
+check("mosaic: no colour swatches", not ov.options.color_buttons[0][1].isVisibleTo(ov.options))
+QTest.mousePress(ov, Qt.MouseButton.LeftButton, pos=QPoint(120, 350))
+for k in range(1, 20):
+    QTest.mouseMove(ov, QPoint(120 + 20 * k, 350))
+QTest.mouseRelease(ov, Qt.MouseButton.LeftButton, pos=QPoint(500, 350))
+check("mosaic stroke kept", ov.shapes[-1].kind == "mosaic" and ov.shapes[-1].cell == annotate.MOSAIC_CELL)
+pic7 = ov.cropped()
+row = [pic7.pixelColor(x, 250).name() for x in range(40, 380)]
+check("mosaic blurs the stripes into blocks", sum(a != b for a, b in zip(row, row[1:])) <= 50)
+row_off = [pic7.pixelColor(x, 290).name() for x in range(40, 380)]
+check("outside the stroke stays sharp", sum(a != b for a, b in zip(row_off, row_off[1:])) > 300)
+ov.set_tool("rect")
+check("box tool: colours back", ov.options.color_buttons[0][1].isVisibleTo(ov.options))
+check("still no screenshot finished", done7 == [])
+s7.close()
+
 check("arrow head never longer than the arrow",
       annotate.arrow_geometry(QPointF(0, 0), QPointF(10, 0), 7)[1].boundingRect().width() <= 6.01)
 

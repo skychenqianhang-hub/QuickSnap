@@ -5,7 +5,7 @@
     drag           draw your own box
     after picking  drag the 8 little squares to resize, drag inside to move,
                    arrow keys nudge by 1 pixel (Shift = 10); toolbar: Copy / Save / Save as / Cancel
-    drawing        toolbar tools box / circle / arrow / pen (+ colour and thickness strip),
+    drawing        toolbar tools box / circle / arrow / pen / text / mosaic (+ colour and size strip),
                    Ctrl+Z undo; once something is drawn the box is locked (app/annotate.py)
 
 One borderless always-on-top window per monitor. Each shows a frozen picture
@@ -18,10 +18,12 @@ placed at 125% / 150% display scaling.
 """
 from __future__ import annotations
 
+import math
+
 from PySide6.QtCore import QObject, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (QColor, QCursor, QFont, QGuiApplication, QImage, QKeySequence, QPainter, QPen,
                            QPixmap)
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QToolButton, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QTextEdit, QToolButton, QWidget
 
 from . import annotate
 from . import selection as geo
@@ -89,7 +91,7 @@ class Toolbar(QFrame):
         lay.setSpacing(2)
         self.tool_buttons: dict[str, QToolButton] = {}
         for kind, tip in [("rect", tr("Box")), ("ellipse", tr("Circle")), ("arrow", tr("Arrow")),
-                          ("pen", tr("Pen"))]:
+                          ("pen", tr("Pen")), ("text", tr("Text")), ("mosaic", tr("Mosaic"))]:
             b = QToolButton(self)
             b.setObjectName("toolBtn")
             b.setIcon(annotate.tool_icon(kind))
@@ -158,7 +160,8 @@ class ToolOptions(QFrame):
             lay.addWidget(b)
             self.size_buttons.append(b)
         lay.addSpacing(4)
-        lay.addWidget(_separator(self))
+        self._sep = _separator(self)
+        lay.addWidget(self._sep)
         lay.addSpacing(6)
         self.color_buttons = []
         for c in annotate.PALETTE:
@@ -172,7 +175,24 @@ class ToolOptions(QFrame):
             b.clicked.connect(lambda _=False, col=c: self._pick_color(col))
             lay.addWidget(b)
             self.color_buttons.append((c, b))
+        self._kind = "line"
         self.sync()
+        self.adjustSize()
+
+    def set_tool(self, tool: str) -> None:
+        """Text: sizes are small / medium / large letters. Mosaic: no colours (it has none)."""
+        kind = "text" if tool == "text" else ("mosaic" if tool == "mosaic" else "line")
+        if kind == self._kind:
+            return
+        self._kind = kind
+        tips = [tr("Small"), tr("Medium"), tr("Large")] if kind == "text" else [tr("Thin"), tr("Medium"), tr("Thick")]
+        for i, b in enumerate(self.size_buttons):
+            b.setIcon(annotate.size_icon(i, "text" if kind == "text" else "line"))
+            b.setToolTip(tips[i])
+        show_colors = kind != "mosaic"
+        self._sep.setVisible(show_colors)
+        for _, b in self.color_buttons:
+            b.setVisible(show_colors)
         self.adjustSize()
 
     def sync(self) -> None:
@@ -191,6 +211,56 @@ class ToolOptions(QFrame):
         annotate.prefs["color"] = color
         self.sync()
         self.changed.emit()
+
+
+class TextEditor(QTextEdit):
+    """Where the user types a text label on the picture. A normal Qt text box, so every
+    input method (Chinese pinyin, Japanese ...) works. Enter = done, Shift+Enter = new line,
+    Esc = drop this text. Grows with its content; transparent, so it looks like the result."""
+
+    committed = Signal()
+    cancelled = Signal()
+
+    def __init__(self, parent: QWidget):
+        super().__init__(parent)
+        self.setFrameStyle(QFrame.Shape.NoFrame)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
+        self.setAcceptRichText(False)
+        self.document().setDocumentMargin(0)
+        self.setCursor(Qt.CursorShape.IBeamCursor)
+        self.textChanged.connect(self._fit)
+        self.color = annotate.PALETTE[0]
+        self.pixel_size = annotate.TEXT_SIZES[1]   # logical pixels
+
+    def style_as(self, color: str, pixel_size: float) -> None:
+        """Colour and font size (logical pixels) — same font as the saved picture uses."""
+        self.color = color
+        self.pixel_size = pixel_size
+        self.setFont(annotate.text_font(pixel_size))
+        self.setStyleSheet(f"QTextEdit {{ background: transparent; color: {color}; border: none; }}")
+        self._fit()
+
+    def _fit(self) -> None:
+        doc = self.document()
+        doc.adjustSize()
+        size = doc.size()
+        fm = self.fontMetrics()
+        w = max(size.width(), fm.horizontalAdvance("M") * 2) + fm.horizontalAdvance("M")  # room for the cursor
+        h = max(size.height(), fm.height())
+        self.setFixedSize(int(math.ceil(w)), int(math.ceil(h)))
+        if self.parent() is not None:
+            self.parent().update()           # the dashed frame around it
+
+    def keyPressEvent(self, e):
+        if e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and not e.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+            self.committed.emit()
+            return
+        if e.key() == Qt.Key.Key_Escape:
+            self.cancelled.emit()
+            return
+        super().keyPressEvent(e)
 
 
 class Overlay(QWidget):
@@ -230,6 +300,11 @@ class Overlay(QWidget):
         self.toolbar.undo_clicked.connect(self.undo)
         self.options = ToolOptions(self)
         self.options.hide()
+        self.options.changed.connect(self._restyle_text)
+        self.text_edit = TextEditor(self)
+        self.text_edit.hide()
+        self.text_edit.committed.connect(self.commit_text)
+        self.text_edit.cancelled.connect(self.cancel_text)
         self._match_monitor()
 
     # ---- which frozen picture belongs to this window
@@ -279,6 +354,8 @@ class Overlay(QWidget):
         self.toolbar.grab()
         self.options.ensurePolished()
         self.options.grab()
+        self.text_edit.style_as(annotate.PALETTE[0], annotate.TEXT_SIZES[1])
+        self.text_edit.ensurePolished()
         img = QImage(400, 80, QImage.Format.Format_RGB32)
         p = QPainter(img)
         self._draw_label(p, "1920 × 1080", QPointF(10, 40))
@@ -365,11 +442,13 @@ class Overlay(QWidget):
         self.set_tool(None if self.tool == kind else kind)
 
     def set_tool(self, kind: str | None) -> None:
+        self.commit_text()
         self.tool = kind
         self.toolbar.show_tool(kind)
         if kind is None:
             self.options.hide()
         else:
+            self.options.set_tool(kind)
             self.options.sync()
             self._place_toolbar()
             self.options.show()
@@ -378,6 +457,9 @@ class Overlay(QWidget):
         self.update()
 
     def undo(self) -> None:
+        if self.typing:       # still typing: drop that text first
+            self.cancel_text()
+            return
         if self.shapes:
             self.shapes.pop()
             self.toolbar.undo_button.setEnabled(bool(self.shapes))
@@ -390,6 +472,59 @@ class Overlay(QWidget):
         self.toolbar.show_tool(None)
         self.toolbar.undo_button.setEnabled(False)
         self.options.hide()
+        self.text_edit.hide()
+        self.text_edit.clear()
+
+    # ---- text labels
+
+    @property
+    def typing(self) -> bool:
+        """A text box is open (isHidden, not isVisible: also right while the window is off screen)."""
+        return not self.text_edit.isHidden()
+
+    def _begin_text(self, pos: QPointF) -> None:
+        """Open the text box where the user clicked (the click is the middle of the first line)."""
+        self.commit_text()
+        px = annotate.TEXT_SIZES[annotate.prefs["size"]]
+        self.text_edit.clear()
+        self.text_edit.style_as(annotate.prefs["color"], px)
+        r = self.to_logical(self.sel)
+        h = self.text_edit.fontMetrics().height()
+        x = min(max(pos.x(), r.left()), r.right() - 4)
+        y = min(max(pos.y() - h / 2, r.top()), r.bottom() - h)
+        self.text_edit.move(round(x), round(y))
+        self.text_edit.show()
+        self.text_edit.raise_()
+        self.text_edit.setFocus()
+        self.update()
+
+    def commit_text(self) -> None:
+        """Turn the text being typed into a label on the picture (empty text is dropped)."""
+        ed = self.text_edit
+        if not self.typing:
+            return
+        text = ed.toPlainText().rstrip("\n")
+        ed.hide()
+        if text.strip():
+            sx, sy = self._scale()
+            top_left = QPointF(ed.x() * sx, ed.y() * sy)
+            self.shapes.append(annotate.Shape("text", ed.color, ed.pixel_size * sx, [top_left], text=text))
+            self.toolbar.undo_button.setEnabled(True)
+        ed.clear()
+        self.setFocus()
+        self.update()
+
+    def cancel_text(self) -> None:
+        self.text_edit.hide()
+        self.text_edit.clear()
+        self.setFocus()
+        self.update()
+
+    def _restyle_text(self) -> None:
+        """Colour / size changed while typing: apply it to the text box right away."""
+        if self.typing:
+            self.text_edit.style_as(annotate.prefs["color"], annotate.TEXT_SIZES[annotate.prefs["size"]])
+            self.text_edit.setFocus()
 
     def _clamp_to_sel(self, p: QPointF) -> QPointF:
         r = self.sel
@@ -403,16 +538,18 @@ class Overlay(QWidget):
 
     def _start_shape(self, pos: QPointF) -> None:
         sx, _ = self._scale()
-        width = annotate.SIZES[annotate.prefs["size"]] * sx    # same look on any scaling
+        width = annotate.size_for(self.tool, annotate.prefs["size"]) * sx   # same look on any scaling
         start = self._clamp_to_sel(self._real_f(pos))
         self._shape = annotate.Shape(self.tool, annotate.prefs["color"], width, [start, QPointF(start)])
-        if self.tool == "pen":
+        if self.tool in ("pen", "mosaic"):
             self._shape.points = [start]
+        if self.tool == "mosaic":
+            self._shape.cell = annotate.MOSAIC_CELL * sx
         self._mode = "draw"
 
     def _extend_shape(self, pos: QPointF) -> None:
         p = self._clamp_to_sel(self._real_f(pos))
-        if self._shape.kind == "pen":
+        if self._shape.kind in ("pen", "mosaic"):
             last = self._shape.points[-1]
             if abs(p.x() - last.x()) + abs(p.y() - last.y()) >= 1.0:
                 self._shape.points.append(p)
@@ -482,7 +619,8 @@ class Overlay(QWidget):
         """The picked area, with the drawings on it, in real pixels."""
         if self.shot is None or self.sel is None or self.sel.isEmpty():
             return None
-        return annotate.render(self.shot.image.copy(self.sel), self.shapes, self.sel.topLeft())
+        self.commit_text()   # text still being typed counts too
+        return annotate.render(self.shot.image, self.shapes, self.sel)
 
     def _part_under(self, pos: QPointF) -> str:
         if self.sel is None or self.locked or self.tool is not None:
@@ -507,7 +645,13 @@ class Overlay(QWidget):
         if e.button() != Qt.MouseButton.LeftButton:
             return
         if self.sel is not None and (self.tool is not None or self.locked):
-            if self.tool is not None and self.to_logical(self.sel).contains(e.position()):
+            inside = self.to_logical(self.sel).contains(e.position())
+            if self.tool == "text":
+                if inside:
+                    self._begin_text(e.position())     # finishes any text being typed, starts a new one
+                else:
+                    self.commit_text()
+            elif self.tool is not None and inside:
                 self._start_shape(e.position())
                 self.update()
             return                                     # outside the box: keep the drawings, do nothing
@@ -654,6 +798,8 @@ class Overlay(QWidget):
             p.drawRect(r.adjusted(1, 1, -1, -1) if box == self.bounds() else r)
             if self.sel is not None and (self.shapes or self._shape is not None):
                 self._draw_shapes(p, r)
+            if self.sel is not None and self.typing:
+                self._draw_text_frame(p)
             self._draw_label(p, f"{box.width()} × {box.height()}", r.topLeft())
             if self.sel is not None and not self.locked and self.tool is None:
                 self._draw_handles(p, r)
@@ -663,7 +809,10 @@ class Overlay(QWidget):
             avoid = [self.to_logical(self.sel), QRectF(self.toolbar.geometry())]
             if self.options.isVisible():
                 avoid.append(QRectF(self.options.geometry()))
-            if self.tool is not None:
+            if self.tool == "text":
+                text = tr("Click inside the box to type · Enter to finish, Shift+Enter for a new line · "
+                          "Esc drops the text")
+            elif self.tool is not None:
                 text = tr("Drag inside the box to draw · Ctrl+Z to undo · "
                           "Right-click or click the tool again to stop drawing")
             elif self.locked:
@@ -686,8 +835,18 @@ class Overlay(QWidget):
         p.setClipRect(sel_logical)
         p.scale(1 / sx, 1 / sy)
         shapes = self.shapes + ([self._shape] if self._shape is not None else [])
-        annotate.paint_shapes(p, shapes)
+        annotate.paint_shapes(p, shapes, self.shot.image if self.shot is not None else None)
         p.restore()
+
+    def _draw_text_frame(self, p: QPainter) -> None:
+        """Dashed frame around the text being typed (dark + light, visible on any background)."""
+        r = QRectF(self.text_edit.geometry()).adjusted(-4, -2, 4, 2)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.setPen(QPen(QColor(0, 0, 0, 160), 1))
+        p.drawRect(r)
+        dash = QPen(QColor(255, 255, 255, 230), 1, Qt.PenStyle.DashLine)
+        p.setPen(dash)
+        p.drawRect(r)
 
     def _cursor_logical(self) -> QPointF:
         sx, sy = self._scale()

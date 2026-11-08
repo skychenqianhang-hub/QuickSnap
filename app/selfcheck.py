@@ -101,20 +101,30 @@ def run(result_path: str) -> int:
         return f"built in {built:.0f} ms once, reused in {reuse:.1f} ms"
 
     def t_draw():
-        from PySide6.QtCore import QPoint as _P, QPointF as _F
+        from PySide6.QtCore import QPointF as _F, QRect as _R
         from PySide6.QtGui import QColor as _C, QImage as _I
         from app import annotate
-        pic = _I(200, 120, _I.Format.Format_RGB32)
+        pic = _I(400, 300, _I.Format.Format_RGB32)      # stands for a whole monitor
         pic.fill(_C("#808080"))
+        for x in range(0, 400, 2):                     # fine stripes, so mosaic has something to blur
+            for y in range(240, 300):
+                pic.setPixelColor(x, y, _C("#000000"))
         shapes = [annotate.Shape("rect", "#FF3B30", 4, [_F(110, 110), _F(190, 170)]),
                   annotate.Shape("arrow", "#007AFF", 4, [_F(120, 200), _F(260, 140)]),
                   annotate.Shape("ellipse", "#34C759", 4, [_F(200, 120), _F(280, 190)]),
-                  annotate.Shape("pen", "#FFCC00", 4, [_F(110, 210), _F(150, 215), _F(190, 205)])]
-        out = annotate.render(pic, shapes, _P(100, 100))   # crop starts at (100, 100)
-        assert (out.width(), out.height()) == (200, 120)
+                  annotate.Shape("pen", "#FFCC00", 4, [_F(110, 210), _F(150, 215), _F(190, 205)]),
+                  annotate.Shape("text", "#FFFFFF", 20, [_F(210, 200)], text="QuickSnap 截图"),
+                  annotate.Shape("mosaic", "", 24, [_F(110, 260), _F(280, 260)], cell=8)]
+        out = annotate.render(pic, shapes, _R(100, 100, 200, 180))   # the picked area
+        assert (out.width(), out.height()) == (200, 180)
         assert out.pixelColor(10, 40) == _C("#FF3B30"), out.pixelColor(10, 40).name()
         assert out.pixelColor(50, 40) == _C("#808080")
-        return "box / arrow / circle / pen painted onto the picture"
+        white = sum(out.pixelColor(x, y) == _C("#FFFFFF") for x in range(110, 200) for y in range(100, 125))
+        assert white > 30, f"text not painted ({white} white pixels)"
+        row = [out.pixelColor(x, 160).name() for x in range(40, 160)]
+        changes = sum(a != b for a, b in zip(row, row[1:]))   # stripes: ~120; mosaic blocks: <= ~15
+        assert changes <= 20, f"mosaic did not blur the stripes ({changes} colour changes)"
+        return "box / arrow / circle / pen / text / mosaic painted onto the picture"
 
     def t_clipboard():
         img = shots_box["shots"][0].image.copy(0, 0, 64, 48)

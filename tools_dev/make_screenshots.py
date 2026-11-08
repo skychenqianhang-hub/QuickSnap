@@ -36,12 +36,12 @@ TEXT = {
                      "• 12:30  Lunch: noodle place by the bridge", "• 15:00  Museum, the photo exhibition",
                      "", "Sunday", "• Sunrise walk on the east trail", "• Pack the camera charger!",
                      "• Send the photos to everyone"],
-           "months": ["Jan", "Feb", "Mar", "Apr", "May", "Jun"]},
+           "months": ["Jan", "Feb", "Mar", "Apr", "May", "Jun"], "note": "Meet here at 8:15!"},
     "zh": {"notes_title": "笔记 — 周末出游", "chart_title": "每月步数",
            "lines": ["周六", "• 8:30  坐火车去湖边（4 号站台）", "• 10:00  码头租自行车",
                      "• 12:30  午饭：桥边那家面馆", "• 15:00  博物馆摄影展", "", "周日",
                      "• 早起去东边步道看日出", "• 别忘了带相机充电器！", "• 把照片发给大家"],
-           "months": ["1月", "2月", "3月", "4月", "5月", "6月"]},
+           "months": ["1月", "2月", "3月", "4月", "5月", "6月"], "note": "8:15 在这里集合！"},
 }
 
 
@@ -171,6 +171,25 @@ def capture_states(lang: str) -> None:
     QTest.qWait(50)
     ov.grab().save(str(OUT / f"capture-draw-{lang}.png"))
     ov.cropped().save(str(OUT / f"result-draw-{lang}.png"))   # what gets copied / saved
+
+    # 5) text + mosaic on the notes window: hide the lunch line, add a note
+    ov.clear_selection()
+    ov.select(QRect(NOTES.left(), NOTES.top(), NOTES.width(), NOTES.height()))
+    ov.shapes = [
+        annotate.Shape("mosaic", "", 28, [QPointF(296, 345), QPointF(620, 345)], cell=8),
+        annotate.Shape("arrow", "#FF3B30", 4, [QPointF(760, 300), QPointF(600, 262)]),
+    ]
+    ov.set_tool("text")
+    annotate.prefs.update({"color": "#FF3B30", "size": 1})
+    ov._begin_text(QPointF(770, 300))
+    ov.text_edit.insertPlainText(TEXT[lang]["note"])
+    QTest.qWait(50)
+    ov.grab().save(str(OUT / f"capture-text-{lang}.png"))      # while typing (dashed frame)
+    ov.commit_text()
+    ov.toolbar.undo_button.setEnabled(True)
+    QTest.qWait(50)
+    ov.grab().save(str(OUT / f"capture-text-done-{lang}.png"))  # after Enter: same place
+    ov.cropped().save(str(OUT / f"result-text-{lang}.png"))
     session.close()
 
 
