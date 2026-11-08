@@ -18,6 +18,7 @@ Windows tray app · window / full-screen / area capture · pixel magnifier · mu
   - **hover** a window — it lights up; **click** to take it (click the empty desktop for the whole screen);
   - **drag** to draw your own box.
 - **Adjust before you keep it** — drag the 8 small squares to resize, drag inside to move, arrow keys nudge it 1 px (`Shift` = 10 px).
+- **Draw on it** — box, circle, arrow, pen, text (any input method, Chinese and Japanese included) and mosaic; 3 sizes and 8 colours, remembered for next time; `Ctrl+Z` undo. The copied / saved picture includes everything you drew. Once you draw, the box stays put.
 - **Copy / Save / Save as… / Cancel** — every option except Cancel also puts the picture on the clipboard, ready to paste into a chat or a document. `Enter` or double-click = copy, `Ctrl+S` = save, `Esc` = cancel.
 - **Pixel magnifier** next to the pointer: 5× zoom with a crosshair on the exact pixel, its position and `#RRGGBB` colour. `Ctrl+C` copies the colour; arrow keys move the pointer one pixel at a time.
 - **Accurate on multiple monitors and with 125% / 150% scaling** — boxes are measured in real screen pixels, so the saved picture is sharp and exactly where you pointed.
@@ -26,6 +27,8 @@ Windows tray app · window / full-screen / area capture · pixel magnifier · mu
 | Hover a window | Drag a box |
 |---|---|
 | ![Hover a window](docs/screenshots/capture-window-en.png) | ![Drag a box](docs/screenshots/capture-drag-en.png) |
+| **Draw: circle, arrow, box, pen** | **Text and mosaic** |
+| ![Drawing](docs/screenshots/capture-draw-en.png) | ![Text and mosaic](docs/screenshots/capture-text-done-en.png) |
 
 ## Install
 

@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.1.0 — 2026-11-09
+
+Draw on your screenshots.
+
+- New tools on the toolbar: box, circle, arrow, pen, text and mosaic, plus undo (`Ctrl+Z`).
+- Thin / medium / thick (small / medium / large for text) and 8 colours; the last choice is remembered.
+- Text works with any input method (Chinese, Japanese …): Enter finishes, Shift+Enter starts a new line,
+  Esc drops only that text.
+- Mosaic is brush-style; the blocks look the same on screen and in the saved picture.
+- Everything you draw is part of the copied / saved picture, in real screen pixels (sharp at 125% / 150%).
+- Once something is drawn the box stays put; right-click first puts the tool down, a second right-click
+  starts over. Clicking outside the box never discards your drawings.
+
 ## 1.0.1 — 2026-11-08
 
 - Faster start of a screenshot: the capture windows are now prepared once, right after
