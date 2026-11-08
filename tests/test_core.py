@@ -326,6 +326,43 @@ sw.autostart_box.setChecked(True)
 check("auto-start checkbox calls through", fc.auto is True and sw.autostart_status.isVisibleTo(sw))
 sw.close()
 
+# --- speed-up: ready-made capture windows are reused; pictures are not kept
+from app.overlay import OverlayPool  # noqa: E402
+
+pool = OverlayPool()
+first_ids = [id(o) for o in pool.overlays]
+results = []
+for round_no in range(3):
+    ses = CaptureSession([MonitorShot(mon, big)], [], pool=pool)
+    ses.finished.connect(lambda a, im: results.append(a))
+    ov = ses.overlays[0]
+    ov.set_shot(MonitorShot(mon, big))
+    check(f"pool round {round_no + 1}: starts clean", ov.sel is None and ov.hover is None and ov._mode is None)
+    ov.select(QRect(10, 10, 50, 40))
+    QTest.keyClick(ov, Qt.Key.Key_Return)
+    ses.close()
+    check(f"pool round {round_no + 1}: picture released", ov.shot is None and ov._pix.isNull())
+check("pool: same windows reused", [id(o) for o in pool.overlays] == first_ids)
+check("pool: one 'copy' per round (no doubled signals)", results == ["copy", "copy", "copy"])
+pool.ensure_current()
+check("pool: no rebuild when screens unchanged", [id(o) for o in pool.overlays] == first_ids)
+pool.rebuild()
+check("pool: rebuild makes new windows", [id(o) for o in pool.overlays] != first_ids)
+pool.close()
+
+# --- timing log
+from app import timing  # noqa: E402
+
+tm = timing.CaptureTimer("hotkey", 4, 12.5, True)
+tm.mark("find windows")
+tm.mark("screen copy")
+line = tm.finish()
+check("timing line has the steps", "find windows" in line and "TOTAL" in line and "key->program 4 ms" in line)
+check("timing written once", tm.finish() == "" and timing.log_path().read_text(encoding="utf-8").count("TOTAL") >= 1)
+for _ in range(2500):
+    timing.write_line("x" * 60)
+check("timing log stays small", timing.log_path().stat().st_size <= timing.MAX_BYTES + 200)
+
 # --- stage 4: choices left by the installer (UTF-8 with BOM, Chinese folder name)
 from app.config import installer_choices_path, take_installer_choices  # noqa: E402
 

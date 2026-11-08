@@ -77,6 +77,29 @@ def run(result_path: str) -> int:
         finally:
             session.close()
 
+    def t_pool():
+        import time as _time
+        from app.overlay import OverlayPool
+        t0 = _time.perf_counter()
+        pool = OverlayPool()
+        built = (_time.perf_counter() - t0) * 1000
+        try:
+            ids = [id(o) for o in pool.overlays]
+            for _ in range(2):
+                s = CaptureSession(shots_box["shots"], [], pool=pool)
+                for ov in s.overlays:
+                    assert ov.shot is not None, "ready-made window not matched to a monitor"
+                s.close()
+                assert all(o.shot is None for o in pool.overlays), "picture kept after closing"
+            assert [id(o) for o in pool.overlays] == ids, "windows were not reused"
+            t1 = _time.perf_counter()
+            s = CaptureSession(shots_box["shots"], [], pool=pool)
+            reuse = (_time.perf_counter() - t1) * 1000
+            s.close()
+        finally:
+            pool.close()
+        return f"built in {built:.0f} ms once, reused in {reuse:.1f} ms"
+
     def t_clipboard():
         img = shots_box["shots"][0].image.copy(0, 0, 64, 48)
         cb = app.clipboard()
@@ -162,11 +185,13 @@ def run(result_path: str) -> int:
         i18n.set_language("en")
         return "builds in en / zh / ja"
 
-    for name, fn in [("monitors", t_monitors), ("windows", t_windows),("screen copy", t_grab), ("capture windows", t_overlay),
+    for name, fn in [("monitors", t_monitors), ("windows", t_windows), ("screen copy", t_grab),
+                     ("capture windows", t_overlay), ("ready-made capture windows", t_pool),
                      ("clipboard", t_clipboard), ("hotkey", t_hotkey), ("settings", t_config),
                      ("save png", t_save), ("languages", t_i18n), ("icon", t_icon),
                      ("start with Windows", t_autostart), ("settings window", t_settings)]:
-        if name in ("capture windows", "clipboard", "save png") and "shots" not in shots_box:
+        if name in ("capture windows", "ready-made capture windows", "clipboard", "save png") \
+                and "shots" not in shots_box:
             lines.append(f"SKIP {name} (no screen picture)")
             failed = True
             continue

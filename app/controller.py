@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -9,12 +10,12 @@ from PySide6.QtCore import QObject, QTimer, QUrl
 from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import QFileDialog, QMenu, QSystemTrayIcon
 
-from . import autostart, capture, i18n, win32
+from . import autostart, capture, i18n, timing, win32
 from .config import APP_NAME, DEFAULTS, Config
 from .hotkey import HotkeyManager, normalize
 from .i18n import tr
 from .icon import app_icon
-from .overlay import CaptureSession
+from .overlay import CaptureSession, OverlayPool
 
 HOTKEY_CAPTURE = 1
 
@@ -36,6 +37,8 @@ class Controller(QObject):
         self.app = app
         self.config = config
         self.session: CaptureSession | None = None
+        self.pool: OverlayPool | None = None   # ready-made capture windows (built right after start-up)
+        self._last_capture: float | None = None
         self.settings = None  # the settings window while it is open
         self._last_saved: Path | None = None
         self._hotkey_paused = False
@@ -50,6 +53,7 @@ class Controller(QObject):
         self.tray.messageClicked.connect(self._on_message_clicked)
         self._build_menu()
         self.tray.show()
+        QTimer.singleShot(0, self._build_pool)  # right after start-up, once the tray icon is up
 
         try:
             autostart.refresh_path()  # the program was moved: keep auto-start pointing at this copy
@@ -84,7 +88,7 @@ class Controller(QObject):
 
     def _on_hotkey(self, hotkey_id: int) -> None:
         if hotkey_id == HOTKEY_CAPTURE:
-            self.start_capture()
+            self.start_capture("hotkey")
 
     def pause_hotkey(self) -> None:
         """While the settings window listens for a new combination, the old one must not fire."""
@@ -194,6 +198,8 @@ class Controller(QObject):
     def set_language(self, code: str) -> None:
         self.config["language"] = i18n.set_language(code)
         self._build_menu()
+        if self.pool is not None and self.session is None:
+            self._build_pool()  # toolbar texts are baked into the ready-made windows
         if self.settings is not None:  # rebuild the open settings window in the new language
             pos = self.settings.pos()
             old = self.settings
@@ -205,18 +211,41 @@ class Controller(QObject):
 
     # ---- capture
 
-    def start_capture(self) -> None:
+    def _build_pool(self) -> None:
+        """Build the capture windows ahead of time (right after start-up, and after a
+        language change), so pressing the hotkey only has to show them."""
+        t0 = time.perf_counter()
+        if self.pool is None:
+            self.pool = OverlayPool()
+        else:
+            self.pool.rebuild()
+        timing.write_line(f"start-up | capture windows ready in {(time.perf_counter() - t0) * 1000:.0f} ms")
+
+    def start_capture(self, source: str = "tray") -> None:
         if self.session is not None:
             return
+        now = time.monotonic()
+        timer = timing.CaptureTimer(
+            source, self.hotkeys.last_delay_ms if source == "hotkey" else None,
+            None if self._last_capture is None else now - self._last_capture, self._last_capture is None)
+        self._last_capture = now
         try:
-            windows = win32.list_windows(exclude_pid=os.getpid())  # before our own overlays exist
+            windows = win32.list_windows(exclude_pid=os.getpid())
+            timer.mark("find windows")
             shots = capture.grab_all()
+            timer.mark("screen copy")
         except OSError as exc:
             self.notify(tr("Screenshot failed"), str(exc))
             return
-        self.session = CaptureSession(shots, windows)
+        if self.pool is None:                      # hotkey pressed before the start-up build finished
+            self.pool = OverlayPool()
+            timer.mark("build windows")
+        self.session = CaptureSession(shots, windows, pool=self.pool)
+        timer.mark("prepare")
         self.session.finished.connect(self._on_finished)
+        self.session.first_painted.connect(timer.finish)
         self.session.start()
+        timer.mark("show")
 
     def _end_session(self) -> None:
         if self.session is not None:
@@ -279,6 +308,8 @@ class Controller(QObject):
         if self.settings is not None:
             self.settings.close()
         self._end_session()
+        if self.pool is not None:
+            self.pool.close()
         self.hotkeys.close()
         self.tray.hide()
         self.app.quit()

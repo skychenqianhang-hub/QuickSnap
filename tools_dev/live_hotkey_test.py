@@ -16,6 +16,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from app import win32  # noqa: E402
+from tools_dev._safety import refuse_if_gaming  # noqa: E402
+
+refuse_if_gaming()  # never press keys while a game / anti-cheat is running
 
 out = Path(sys.argv[1])
 out.mkdir(parents=True, exist_ok=True)

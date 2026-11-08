@@ -107,6 +107,10 @@ def vk_from_qt(qt_key: int) -> int:
 MODIFIER_VKS = {0x10, 0x11, 0x12, 0x5B, 0x5C, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5}  # Shift/Ctrl/Alt/Win
 
 
+_kernel32 = ctypes.WinDLL("kernel32")
+_kernel32.GetTickCount.restype = wintypes.DWORD
+
+
 class _Filter(QAbstractNativeEventFilter):
     """Looks at every Windows message the program receives and picks out ours.
     Keeps only plain values (the window handle) plus the two signals, so it can
@@ -119,6 +123,7 @@ class _Filter(QAbstractNativeEventFilter):
         self.on_show = on_show
         self.on_quit = on_quit
         self.active = True
+        self.last_delay_ms: int | None = None  # key press -> message reached us (for the timing log)
 
     def nativeEventFilter(self, event_type, message):
         try:
@@ -127,6 +132,8 @@ class _Filter(QAbstractNativeEventFilter):
             msg = wintypes.MSG.from_address(int(message))
             if msg.hWnd == self.hwnd:
                 if msg.message == win32.WM_HOTKEY:
+                    # msg.time = when Windows posted it (ms since boot, wraps after 49 days)
+                    self.last_delay_ms = (_kernel32.GetTickCount() - msg.time) & 0xFFFFFFFF
                     self.on_hotkey(int(msg.wParam))
                     return True, 0
                 if msg.message == WM_SHOW_SETTINGS:
@@ -163,6 +170,10 @@ class HotkeyManager(QObject):
                                self.quit_requested.emit)
         app.installNativeEventFilter(self._filter)
         self._registered: set[int] = set()
+
+    @property
+    def last_delay_ms(self) -> int | None:
+        return self._filter.last_delay_ms
 
     def close(self) -> None:
         """Release the shortcuts and stop listening (the self-check makes a temporary one)."""

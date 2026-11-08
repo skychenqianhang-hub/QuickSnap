@@ -17,7 +17,8 @@ placed at 125% / 150% display scaling.
 from __future__ import annotations
 
 from PySide6.QtCore import QObject, QPoint, QPointF, QRect, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QCursor, QFont, QGuiApplication, QKeySequence, QPainter, QPen, QPixmap
+from PySide6.QtGui import (QColor, QCursor, QFont, QGuiApplication, QImage, QKeySequence, QPainter, QPen,
+                           QPixmap)
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QToolButton, QWidget
 
 from . import selection as geo
@@ -84,12 +85,13 @@ class Toolbar(QFrame):
 class Overlay(QWidget):
     action = Signal(str)
     selection_started = Signal(object)  # self
+    first_painted = Signal()            # first drawing after reset() (for the timing log)
 
     def __init__(self, screen, shots: list[MonitorShot], window_rects=()):
         super().__init__(None)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
                             | Qt.WindowType.Tool)
-        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self._report_paint = True
         self.setCursor(Qt.CursorShape.ArrowCursor)
         self.setMouseTracking(True)
         self.setGeometry(screen.geometry())
@@ -129,6 +131,37 @@ class Overlay(QWidget):
         m = shot.monitor
         self.windows = geo.windows_on_monitor(self._window_rects, m.left, m.top, m.width, m.height)
         self.update()
+
+    def reset(self, shots: list[MonitorShot], window_rects=()) -> None:
+        """Get a reused (pooled) window ready for a new screenshot."""
+        self._shots = shots
+        self._window_rects = list(window_rects)
+        self.windows = []
+        self.shot = None
+        self._pix = QPixmap()
+        self.sel = self.hover = None
+        self._mode = None
+        self._press = self._orig = None
+        self.cursor_px = None
+        self._copied = None
+        self._copied_timer.stop()
+        self.toolbar.hide()
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+        self._report_paint = True
+        self._match_monitor()
+
+    def release(self) -> None:
+        """After a screenshot: forget the frozen picture so it doesn't sit in memory."""
+        self.reset([], ())
+
+    def warm_up(self) -> None:
+        """Load fonts, styles and the toolbar once, off screen (nothing is shown)."""
+        self.toolbar.ensurePolished()
+        self.toolbar.grab()
+        img = QImage(400, 80, QImage.Format.Format_RGB32)
+        p = QPainter(img)
+        self._draw_label(p, "1920 × 1080", QPointF(10, 40))
+        p.end()
 
     def showEvent(self, e):
         super().showEvent(e)
@@ -398,6 +431,10 @@ class Overlay(QWidget):
                               [self.to_logical(self.sel), QRectF(self.toolbar.geometry())])
         if self.magnifier_visible():
             self._draw_magnifier(p)
+        p.end()
+        if self._report_paint and self.shot is not None and self.isVisible():
+            self._report_paint = False
+            self.first_painted.emit()
 
     def _cursor_logical(self) -> QPointF:
         sx, sy = self._scale()
@@ -544,23 +581,75 @@ class Overlay(QWidget):
         p.drawText(box, Qt.AlignmentFlag.AlignCenter, text)
 
 
+class OverlayPool:
+    """The capture windows, built once (at start-up) and reused for every screenshot.
+
+    Building them is the slow part (about half a second the first time, mostly loading
+    fonts and styles), so doing it ahead keeps the hotkey snappy. They stay hidden and
+    hold no picture between screenshots. Rebuilt when monitors or scaling change, or
+    when the interface language changes (toolbar texts).
+    """
+
+    def __init__(self):
+        self.overlays: list[Overlay] = []
+        self._key = None
+        self.rebuild()
+
+    @staticmethod
+    def _screens_key():
+        return tuple((s.name(), s.geometry().getRect(), round(s.devicePixelRatio(), 3))
+                     for s in QGuiApplication.screens())
+
+    def rebuild(self) -> None:
+        for ov in self.overlays:
+            ov.close()
+            ov.deleteLater()
+        self.overlays = [Overlay(screen, []) for screen in QGuiApplication.screens()]
+        self._key = self._screens_key()
+        for ov in self.overlays:
+            ov.warm_up()
+
+    def ensure_current(self) -> None:
+        """Monitors plugged in / out or scaling changed since last time -> rebuild."""
+        if self._screens_key() != self._key:
+            self.rebuild()
+
+    def close(self) -> None:
+        for ov in self.overlays:
+            ov.close()
+            ov.deleteLater()
+        self.overlays = []
+
+
 class CaptureSession(QObject):
-    """Opens one overlay per monitor and reports what the user chose.
+    """Shows one overlay per monitor and reports what the user chose.
 
     finished(action, image) — action is "copy" / "save" / "save_as" / "cancel";
     image is None when cancelled.
+    With a pool, its ready-made windows are reused (and only hidden afterwards);
+    without one, fresh windows are built (tests, self-check).
     """
 
     finished = Signal(str, object)
+    first_painted = Signal()
 
-    def __init__(self, shots: list[MonitorShot], window_rects=()):
+    def __init__(self, shots: list[MonitorShot], window_rects=(), pool: OverlayPool | None = None):
         super().__init__()
-        self.overlays: list[Overlay] = []
-        for screen in QGuiApplication.screens():
-            ov = Overlay(screen, shots, window_rects)
-            ov.action.connect(lambda a, o=ov: self._on_action(o, a))
+        self._pool = pool
+        if pool is not None:
+            pool.ensure_current()
+            self.overlays = list(pool.overlays)
+            for ov in self.overlays:
+                ov.reset(shots, window_rects)
+        else:
+            self.overlays = [Overlay(screen, shots, window_rects) for screen in QGuiApplication.screens()]
+        self._slots = []
+        for ov in self.overlays:
+            on_action = (lambda a, o=ov: self._on_action(o, a))
+            ov.action.connect(on_action)
             ov.selection_started.connect(self._on_selection_started)
-            self.overlays.append(ov)
+            ov.first_painted.connect(self.first_painted)
+            self._slots.append((ov, on_action))
         self._done = False
 
     def start(self) -> None:
@@ -582,8 +671,21 @@ class CaptureSession(QObject):
         self.start()
 
     def close(self) -> None:
+        for ov, on_action in self._slots:
+            try:
+                ov.action.disconnect(on_action)
+                ov.selection_started.disconnect(self._on_selection_started)
+                ov.first_painted.disconnect(self.first_painted)
+            except (RuntimeError, TypeError):
+                pass
+        self._slots = []
         for ov in self.overlays:
-            ov.close()
+            if self._pool is not None:
+                ov.hide()
+                ov.release()          # keep the window, drop the picture
+            else:
+                ov.close()
+                ov.deleteLater()
         self.overlays = []
 
     def _on_selection_started(self, who: Overlay) -> None:
