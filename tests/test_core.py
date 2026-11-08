@@ -481,6 +481,52 @@ check("box tool: colours back", ov.options.color_buttons[0][1].isVisibleTo(ov.op
 check("still no screenshot finished", done7 == [])
 s7.close()
 
+# Save / Save as tell you the picture also goes to the clipboard (user request 2026-11-09)
+from PySide6.QtWidgets import QToolButton, QWidget  # noqa: E402
+
+from app.overlay import Toolbar  # noqa: E402
+
+for lang, word in (("en", "clipboard"), ("zh", "剪贴板"), ("ja", "クリップボード")):
+    i18n.set_language(lang)
+    holder = QWidget()                 # keep a reference, or the toolbar is deleted with it
+    tb = Toolbar(holder)
+    tips = {b.objectName(): b.toolTip() for b in tb.findChildren(QToolButton)}
+    check(f"{lang}: Save / Save as tips mention the clipboard",
+          word in tips["saveBtn"] and word in tips["saveAsBtn"])
+i18n.set_language("en")
+
+# Button tips follow the mouse and keep clear of the pointer (user request 2026-11-09)
+from PySide6.QtGui import QHelpEvent  # noqa: E402
+
+s8 = CaptureSession([], [])
+ov = s8.overlays[0]
+ov.set_shot(MonitorShot(mon, plain))
+ov.resize(W, H)
+ov.select(QRect(300, 300, 400, 200))
+save_btn = next(b for b in ov.toolbar.findChildren(QToolButton) if b.objectName() == "saveBtn")
+check("Windows' own tooltip is suppressed",
+      ov.eventFilter(save_btn, QHelpEvent(QEvent.Type.ToolTip, QPoint(5, 5), QPoint(5, 5))) is True)
+ov.eventFilter(save_btn, QEvent(QEvent.Type.Enter))
+check("hovering starts the tip timer", ov._tip_timer.isActive() and ov._tip_button is save_btn)
+ov._show_tip(QPoint(500, 500))
+tip = ov.hover_tip
+check("tip shows the button's text", not tip.isHidden() and tip.text() == save_btn.toolTip())
+check("tip sits below-right, clear of the pointer", tip.pos() == QPoint(500 + 16, 500 + 26))
+tip.place_at(QPoint(620, 540))
+check("tip follows the mouse", tip.pos() == QPoint(636, 566))
+tip.place_at(QPoint(W - 5, 500))
+check("near the right edge it flips to the left", tip.geometry().right() < W - 5 and tip.x() >= 0)
+tip.place_at(QPoint(500, H - 5))
+check("near the bottom it goes above", tip.geometry().bottom() < H - 5)
+ov.eventFilter(save_btn, QEvent(QEvent.Type.Leave))
+check("leaving the button hides the tip", tip.isHidden() and not ov._tip_timer.isActive())
+ov.set_tool("text")
+size_btn = ov.options.size_buttons[2]
+ov.eventFilter(size_btn, QEvent(QEvent.Type.Enter))
+ov._show_tip(QPoint(400, 400))
+check("size tip follows the tool (text: Large)", tip.text() == "Large")
+s8.close()
+
 check("arrow head never longer than the arrow",
       annotate.arrow_geometry(QPointF(0, 0), QPointF(10, 0), 7)[1].boundingRect().width() <= 6.01)
 

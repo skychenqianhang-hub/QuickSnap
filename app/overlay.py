@@ -20,10 +20,10 @@ from __future__ import annotations
 
 import math
 
-from PySide6.QtCore import QObject, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (QColor, QCursor, QFont, QGuiApplication, QImage, QKeySequence, QPainter, QPen,
                            QPixmap)
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QTextEdit, QToolButton, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QTextEdit, QToolButton, QWidget
 
 from . import annotate
 from . import selection as geo
@@ -115,8 +115,10 @@ class Toolbar(QFrame):
         lay.addWidget(_separator(self))
         lay.addSpacing(4)
         for key, text, tip, name in [
-            ("save_as", tr("Save as…"), tr("Choose a folder and file name"), "saveAsBtn"),
-            ("save", tr("Save"), tr("Save to the screenshot folder (Ctrl+S)"), "saveBtn"),
+            ("save_as", tr("Save as…"), tr("Choose a folder and file name — also copied to the clipboard"),
+             "saveAsBtn"),
+            ("save", tr("Save"), tr("Save to the screenshot folder — also copied to the clipboard (Ctrl+S)"),
+             "saveBtn"),
             ("cancel", "✕  " + tr("Cancel"), tr("Discard this screenshot (Esc)"), "cancelBtn"),
             ("copy", "✓  " + tr("Copy"), tr("Copy to clipboard (Enter or double-click)"), "copyBtn"),
         ]:
@@ -213,6 +215,37 @@ class ToolOptions(QFrame):
         self.changed.emit()
 
 
+class HoverTip(QLabel):
+    """Our own button tip, shown below-right of the mouse pointer and following it.
+
+    Windows' standard tooltip appears right under the arrow, so the pointer covers its
+    first words, and it doesn't move. This one keeps clear of the arrow (TIP_OFFSET),
+    follows the mouse while it stays on the button, and flips to the other side near
+    the screen edges. Same look as the magnifier's info box."""
+
+    TIP_OFFSET = QPoint(16, 26)   # logical pixels from the pointer's tip: clear of the arrow
+    DELAY_MS = 350                # short wait, so sweeping across the toolbar doesn't flicker
+
+    def __init__(self, parent: QWidget):
+        super().__init__(parent)
+        self.setStyleSheet("QLabel { background: rgba(20, 20, 20, 235); color: #f2f2f2;"
+                           " border: 1px solid #555; border-radius: 4px; padding: 4px 8px; font-size: 12px; }")
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.hide()
+
+    def place_at(self, cursor: QPoint) -> None:
+        """Put the tip below-right of `cursor` (overlay coordinates), inside the screen."""
+        self.adjustSize()
+        area = self.parentWidget().rect()
+        x = cursor.x() + self.TIP_OFFSET.x()
+        y = cursor.y() + self.TIP_OFFSET.y()
+        if x + self.width() > area.right():
+            x = cursor.x() - 8 - self.width()        # left of the pointer
+        if y + self.height() > area.bottom():
+            y = cursor.y() - 8 - self.height()       # above the pointer
+        self.move(max(area.left(), x), max(area.top(), y))
+
+
 class TextEditor(QTextEdit):
     """Where the user types a text label on the picture. A normal Qt text box, so every
     input method (Chinese pinyin, Japanese ...) works. Enter = done, Shift+Enter = new line,
@@ -305,6 +338,14 @@ class Overlay(QWidget):
         self.text_edit.hide()
         self.text_edit.committed.connect(self.commit_text)
         self.text_edit.cancelled.connect(self.cancel_text)
+        self.hover_tip = HoverTip(self)
+        self._tip_button: QToolButton | None = None
+        self._tip_timer = QTimer(self, singleShot=True, interval=HoverTip.DELAY_MS)
+        self._tip_timer.timeout.connect(self._show_tip)
+        for b in self.toolbar.findChildren(QToolButton) + self.options.findChildren(QToolButton):
+            if b.toolTip():
+                b.setMouseTracking(True)
+                b.installEventFilter(self)   # our tip instead of Windows' tooltip
         self._match_monitor()
 
     # ---- which frozen picture belongs to this window
@@ -338,6 +379,7 @@ class Overlay(QWidget):
         self.cursor_px = None
         self._copied = None
         self._copied_timer.stop()
+        self._hide_tip()
         self._clear_drawing()
         self.toolbar.hide()
         self.setCursor(Qt.CursorShape.ArrowCursor)
@@ -734,6 +776,37 @@ class Overlay(QWidget):
             self.action.emit("copy")
         else:
             self.mousePressEvent(e)
+
+    # ---- button tips that follow the mouse
+
+    def eventFilter(self, obj, e):
+        t = e.type()
+        if isinstance(obj, QToolButton):
+            if t == QEvent.Type.ToolTip:
+                return True                                   # no standard tooltip
+            if t == QEvent.Type.Enter:
+                self._tip_button = obj
+                self._tip_timer.start()
+            elif t in (QEvent.Type.Leave, QEvent.Type.MouseButtonPress, QEvent.Type.Hide):
+                if obj is self._tip_button:
+                    self._hide_tip()
+            elif t == QEvent.Type.MouseMove and obj is self._tip_button and not self.hover_tip.isHidden():
+                self.hover_tip.place_at(self.mapFromGlobal(QCursor.pos()))
+        return super().eventFilter(obj, e)
+
+    def _show_tip(self, cursor: QPoint | None = None) -> None:
+        b = self._tip_button
+        if b is None or not b.toolTip():
+            return
+        self.hover_tip.setText(b.toolTip())   # read now: the text follows tool / language changes
+        self.hover_tip.place_at(cursor if cursor is not None else self.mapFromGlobal(QCursor.pos()))
+        self.hover_tip.show()
+        self.hover_tip.raise_()
+
+    def _hide_tip(self) -> None:
+        self._tip_timer.stop()
+        self._tip_button = None
+        self.hover_tip.hide()
 
     def leaveEvent(self, e):
         self.cursor_px = None  # the mouse went to another monitor
